@@ -220,6 +220,41 @@ def make_natorb(
         occ_no[1][mask_beta],
     )
 
+def make_mbo(
+    rdm1: np.ndarray,
+    ovlp: np.ndarray,
+    natm: int,
+    ao_labels: list,
+) -> np.ndarray:
+    """
+    Mayer bond order index between two atoms.
+    """
+
+    # a stacked (2, n_ao, n_ao) alpha/beta rdm1 is summed to the total density;
+    # checked via ndim (not len()) so this isn't ambiguous for an n_ao == 2 system
+    if rdm1.ndim == 3:
+        rdm1 = np.sum(rdm1, axis=0)
+
+    # population matrix
+    popmat = rdm1 @ ovlp
+
+    interm_1 = popmat * popmat.T
+
+    # AOs are ordered per-atom by pyscf; group rows/cols of interm_1 by atom via
+    # a boundary-based segment sum -- O(n_ao**2) and vectorized, instead of the
+    # O(n_ao**2 * natm) matmul (or an O(n_ao**2) pure-Python loop) this replaces
+    ao_atom_idx = np.array([lbl[0] for lbl in ao_labels], dtype=np.intp)
+    ao_starts = np.searchsorted(ao_atom_idx, np.arange(natm), side="left")
+    ao_stops = np.searchsorted(ao_atom_idx, np.arange(natm), side="right")
+    ao_empty_atom = ao_starts == ao_stops  # atoms with no AOs (e.g. ghost atoms)
+
+    row_grouped = np.add.reduceat(interm_1, ao_starts, axis=0)
+    mbo = np.add.reduceat(row_grouped, ao_starts, axis=1)
+    if ao_empty_atom.any():
+        mbo[ao_empty_atom, :] = 0.0
+        mbo[:, ao_empty_atom] = 0.0
+
+    return mbo
 
 def write_rdm1(
     mol: gto.Mole,

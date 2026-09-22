@@ -78,16 +78,10 @@ def bond_mbo(
     ao_labels = pmol.ao_labels(fmt=None)
     n_ao = len(ao_labels)                # Number of AOs
 
-    # AO -> atom indicator matrix, built once and reused by every atom-grouping step below
+    # AO -> atom indicator matrix, used by the (disabled by default) Mulliken check below
     ao_atom_idx = np.array([lbl[0] for lbl in ao_labels])
     atom_of_ao = np.zeros((n_ao, natm), dtype=np.float64)
     atom_of_ao[np.arange(n_ao), ao_atom_idx] = 1.0
-
-    # per-atom AO index boundaries (AOs are ordered per-atom by pyscf), used for an
-    # O(n_ao**2) segment-sum grouping instead of an O(n_ao**2 * natm) matmul below
-    aoslices = pmol.aoslice_by_atom()
-    ao_bounds = aoslices[:, 2].astype(np.intp)
-    ao_empty_atom = aoslices[:, 2] == aoslices[:, 3]
 
     # generate the 1e RDM
     # for an RHF reference, beta is identical to alpha, so it is not recomputed
@@ -161,18 +155,7 @@ def bond_mbo(
 
         rdm1_mbo = rdm1_a + rdm1_b
 
-        ps = rdm1_mbo @ ovlp
-
-        interm_1 = ps * ps.T # (PS) dot (PS)
-
-        # group rows/cols of interm_1 by atom (segment sum); equivalent to
-        # atom_of_ao.T @ interm_1 @ atom_of_ao but O(n_ao**2) instead of
-        # O(n_ao**2 * natm), since AOs are contiguous per atom
-        row_grouped = np.add.reduceat(interm_1, ao_bounds, axis=0)
-        mbo = np.add.reduceat(row_grouped, ao_bounds, axis=1)
-        if ao_empty_atom.any():
-            mbo[ao_empty_atom, :] = 0.0
-            mbo[:, ao_empty_atom] = 0.0
+        mbo = make_mbo(rdm1_mbo, ovlp, natm, ao_labels)
 
         do_check = False # set manually for now
         if do_check:
@@ -418,7 +401,7 @@ def orb_mbo(
         return mbo_AtoB
     # end def _mbo_atom_to_bond()
 
-    mbo_full = make_mbo(np.sum(rdm1, axis=-1), ovlp, natm, ao_labels)
+    mbo_full = make_mbo(rdm1, ovlp, natm, ao_labels)
 
     return mbo_sorted, mbo_full
 # end def orb_mbo()
