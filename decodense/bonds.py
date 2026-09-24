@@ -31,6 +31,11 @@ def bond_mbo(
     pop_method: str,
     ndo: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    This function calculates the Mayer bond orders for the given molecule.
+    It returns an array with normalized MBOs from atom to bond (atom_labels,bond_labels)
+    and an array with (non-normalized) MBOs ordered according to bond_label.
+    """
 
     # RHF reference
     if mo_occ[0].size == mo_occ[1].size:

@@ -471,6 +471,35 @@ def prop_tot(
             CompKeys.orbsym: orbsym(mol, mo_coeff),
         }
 
+def a2ap_decompose(
+    atom_res: Dict[str, Union[np.ndarray, List[np.ndarray]]],
+    a2ap_weights: np.ndarray,
+) -> Dict[str, Union[np.ndarray, List[np.ndarray]]]:
+    """
+    This function takes a dictionary of atom-wise results
+    and redistributes them over the atom pairs using the provided weights.
+    Note: assumes that the weights are normalized, in order to achieve a losless decomposition.
+    """
+    #TODO: somehow add a way to prevent this function being called with an orbital-wise decomposed dictionary
+
+    # Check for atom-wise decomposition
+    # + replace key for atom charge by key for atom pair charge
+    if CompKeys.charge_atom in atom_res:
+        atom_res[CompKeys.charge_ap] = atom_res[CompKeys.charge_atom]
+        del atom_res[CompKeys.charge_atom]
+    else:
+        raise ValueError("a2ap_decompose was called with a source partitioning that is NOT atom-wise!")
+
+    # Initialize dictionary with atom-pair-decomposed results
+    ap_res = {}
+
+    # Loop over the entries of the atom-decomposed results dictionary
+    keyslist = list(atom_res.keys())
+
+    for k in keyslist:
+        ap_res[k] = atom_res[k] @ a2ap_weights #NOTE: this only works for energies so far. TODO: add for dipoles
+
+    return ap_res
 
 def _e_nuc(mol: gto.Mole) -> np.ndarray:
     """
