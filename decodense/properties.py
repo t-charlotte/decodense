@@ -19,7 +19,7 @@ from pyscf.pbc import dft as pbc_dft
 from pyscf.pbc import gto as pbc_gto
 from pyscf.pbc import scf as pbc_scf
 from pyscf.pbc.dft import numint as pbc_numint
-from typing import List, Tuple, Dict, Union, Any, Optional
+from typing import Union, Any, Optional
 
 from .pbctools import ewald_e_nuc, get_nuc_pbc
 from .tools import dim, make_rdm1, orbsym, contract
@@ -39,8 +39,8 @@ def prop_tot(
         pbc_dft.rks.RKS,
         pbc_dft.uks.UKS,
     ],
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    mo_occ: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    mo_occ: tuple[np.ndarray, np.ndarray],
     rdm1: Optional[np.ndarray],
     minao: str,
     pop_method: str,
@@ -48,8 +48,8 @@ def prop_tot(
     part: str,
     ndo: bool,
     gauge_origin: np.ndarray,
-    weights: List[np.ndarray],
-) -> Dict[str, Union[np.ndarray, List[np.ndarray]]]:
+    weights: list[np.ndarray],
+) -> dict[str, Union[np.ndarray, list[np.ndarray]]]:
     """
     this function returns atom-decomposed mean-field properties
     """
@@ -78,14 +78,15 @@ def prop_tot(
 
     # compute total 1-RDMs (AO basis)
     if rdm1 is None:
-        rdm1 = np.array(
+        rdm1 = rdm1_tot = np.array(
+            [make_rdm1(mo_coeff[0], mo_occ[0]), make_rdm1(mo_coeff[1], mo_occ[1])]
+        )
+    else:
+        rdm1_tot = np.array(
             [make_rdm1(mo_coeff[0], mo_occ[0]), make_rdm1(mo_coeff[1], mo_occ[1])]
         )
     if rdm1.ndim == 2:
         rdm1 = np.array([rdm1, rdm1]) * 0.5
-    rdm1_tot = np.array(
-        [make_rdm1(mo_coeff[0], mo_occ[0]), make_rdm1(mo_coeff[1], mo_occ[1])]
-    )
 
     # mol object projected into minao basis
     if pop_method == "iao":
@@ -204,12 +205,12 @@ def prop_tot(
     if part == "eda":
         ao_labels = mol.ao_labels(fmt=None)
 
-    def prop_atom(atom_idx: int) -> Dict[str, Any]:
+    def prop_atom(atom_idx: int) -> dict[str, Any]:
         """
         this function returns atom-wise energy/dipole contributions
         """
         # init results
-        res: Dict[str, Union[float, np.ndarray]] = {}
+        res: dict[str, Union[float, np.ndarray]] = {}
         # atom-specific rdm1
         rdm1_atom = np.zeros_like(rdm1_tot)
         # loop over spins
@@ -235,20 +236,17 @@ def prop_tot(
                 res[CompKeys.exch] -= _trace(vk[i], rdm1_atom[i], scaling=0.5)
         # common energy contributions associated with given atom
         if prop_type == "energy":
+            rdm1_atom_sum = np.sum(rdm1_atom, axis=0)
             if restrict:
-                res[CompKeys.coul] = _trace(vj, np.sum(rdm1_atom, axis=0), scaling=0.5)
-                res[CompKeys.exch] = -_trace(
-                    vk, np.sum(rdm1_atom, axis=0), scaling=0.25
-                )
-            res[CompKeys.kin] = _trace(kin, np.sum(rdm1_atom, axis=0))
-            res[CompKeys.nuc_att_loc] = _trace(
-                nuc, np.sum(rdm1_atom, axis=0), scaling=0.5
-            )
+                res[CompKeys.coul] = _trace(vj, rdm1_atom_sum, scaling=0.5)
+                res[CompKeys.exch] = -_trace(vk, rdm1_atom_sum, scaling=0.25)
+            res[CompKeys.kin] = _trace(kin, rdm1_atom_sum)
+            res[CompKeys.nuc_att_loc] = _trace(nuc, rdm1_atom_sum, scaling=0.5)
             res[CompKeys.nuc_att_glob] = _trace(
                 sub_nuc[atom_idx], np.sum(rdm1_tot, axis=0), scaling=0.5
             )
             if pot_solv is not None:
-                res[CompKeys.solvent] = _trace(pot_solv, np.sum(rdm1_atom, axis=0))
+                res[CompKeys.solvent] = _trace(pot_solv, rdm1_atom_sum)
             if nuc_solv is not None:
                 res[CompKeys.solvent] += nuc_solv[atom_idx]
             if vdW_solv is not None:
@@ -278,7 +276,7 @@ def prop_tot(
             res[CompKeys.el] = sum(res.values())
         return res
 
-    def prop_eda(atom_idx: int) -> Dict[str, Any]:
+    def prop_eda(atom_idx: int) -> dict[str, Any]:
         """
         this function returns EDA energy/dipole contributions
         """
@@ -362,7 +360,7 @@ def prop_tot(
             res[CompKeys.el] = sum(res.values())
         return res
 
-    def prop_orb(spin_idx: int, orb_idx: int) -> Dict[str, Any]:
+    def prop_orb(spin_idx: int, orb_idx: int) -> dict[str, Any]:
         """
         this function returns bond-wise energy/dipole contributions
         """
@@ -408,7 +406,7 @@ def prop_tot(
         return res
 
     # perform decomposition
-    prop: Dict[str, Union[np.ndarray, List[np.ndarray]]]
+    prop: dict[str, Union[np.ndarray, list[np.ndarray]]]
     if part in ["atoms", "eda"]:
         # domain
         domain = np.arange(pmol.natm)
@@ -526,7 +524,7 @@ def _dip_nuc(mol: gto.Mole, gauge_origin: np.ndarray) -> np.ndarray:
 def _h_core(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.RHF],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     this function returns the components of the core hamiltonian
     """
@@ -569,7 +567,7 @@ def _solvent(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.RHF],
     rdm1: np.ndarray,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
     # initialize
     pot_solv, nuc_solv, vdW_solv = None, None, None
 
@@ -612,7 +610,7 @@ def _solvent(
     return pot_solv, nuc_solv, vdW_solv
 
 
-def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> Tuple[np.ndarray, np.ndarray]:
+def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> tuple[np.ndarray, np.ndarray]:
     """
     this function returns the full mm potential and the nuclei interaction with the
     point charges (adapted from: qmmm/itrf.py:get_hcore() in PySCF)
@@ -620,14 +618,13 @@ def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> Tuple[np.ndarray, np.ndar
     # settings
     coords = mm_mol.atom_coords()
     charges = mm_mol.atom_charges()
-    blksize = BLKSIZE
     # integrals
     intor = "int3c2e_cart" if mol.cart else "int3c2e_sph"
     cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, intor)
     # compute interaction potential
     nao = mol.nao_nr()
     mm_pot = np.zeros(nao * (nao + 1) // 2, dtype=np.float64)
-    for i0, i1 in lib.prange(0, charges.size, blksize):
+    for i0, i1 in lib.prange(0, charges.size, BLKSIZE):
         fakemol = gto.fakemol_for_charges(coords[i0:i1])
         j3c = df.incore.aux_e2(mol, fakemol, intor=intor, aosym="s2ij", cintopt=cintopt)
         mm_pot += np.einsum("xk,k->x", j3c, -charges[i0:i1])
@@ -647,7 +644,7 @@ def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> Tuple[np.ndarray, np.ndar
 
 def _pcm(
     mol: gto.Mole, rdm1: np.ndarray, solvent_model: solvent.PCM
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     this function returns the pcm potential matrix and the nuclei interaction with the
     solvent (adapted from: solvent/pcm.py:_get_vind() in PySCF)
@@ -679,7 +676,7 @@ def _pcm(
     return vmat_e, nuc_solv_pcm
 
 
-def _xc_ao_deriv(xc_func: str) -> Tuple[str, int]:
+def _xc_ao_deriv(xc_func: str) -> tuple[str, int]:
     """
     this function returns the type of xc functional and the level of ao derivatives
     needed
@@ -696,18 +693,13 @@ def _xc_ao_deriv(xc_func: str) -> Tuple[str, int]:
 
 def _make_rho_interm1(
     ao_value: np.ndarray, rdm1: np.ndarray, xc_type: str
-) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
     """
     this function returns the rho intermediates (c0, c1) needed in _make_rho()
     (adpated from: dft/numint.py:eval_rho() in PySCF)
     """
-    # determine dimensions based on xctype
-    xctype = xc_type.upper()
-    if xctype == "LDA" or xctype == "HF":
-        ngrids, nao = ao_value.shape
-    else:
-        ngrids, nao = ao_value[0].shape
     # compute rho intermediate based on xctype
+    xctype = xc_type.upper()
     if xctype == "LDA" or xctype == "HF":
         c0 = contract("ik,kj->ij", ao_value, rdm1)
         c1 = None
@@ -715,10 +707,11 @@ def _make_rho_interm1(
         c0 = contract("ik,kj->ij", ao_value[0], rdm1)
         c1 = None
     else:  # meta-GGA
+        ngrids, nao = ao_value[0].shape
         c0 = contract("ik,kj->ij", ao_value[0], rdm1)
         c1 = np.empty((3, ngrids, nao), dtype=np.float64)
         for i in range(1, 4):
-            c1[i - 1] = contract("ik,jk->ij", ao_value[i], rdm1)
+            c1[i - 1] = contract("ik,kj->ij", ao_value[i], rdm1)
     return c0, c1
 
 
@@ -762,7 +755,7 @@ def _make_rho_interm2(
 
 def _make_rho(
     ao_value: np.ndarray, rdm1: np.ndarray, xc_type: str
-) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
+) -> tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
     """
     this function returns important dft intermediates, e.g., energy density, grid
     weights, etc.
