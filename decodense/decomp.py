@@ -23,6 +23,7 @@ from .tools import logger
 class CompKeys:
     coul = "Coul."
     exch = "Exch."
+    exch_DFT = "Exch. (DFT)",
     kin = "Kin."
     solvent = "Solv."
     solvent_vdw = "Solv. (vdW)"
@@ -44,6 +45,7 @@ class CompKeys:
 comp_key_dict = {
     "Coul.": "coul",
     "Exch.": "exch",
+    "Exch. (DFT)": "exch_dft",
     "Kin.": "kin",
     "Solv.": "solvent",
     "Solv. (vdW)": "solvent_vdw",
