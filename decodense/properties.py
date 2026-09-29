@@ -479,14 +479,7 @@ def a2ap_decompose(
     Note: assumes that the weights are normalized, in order to achieve a losless decomposition.
     """
     #TODO: somehow add a way to prevent this function being called with an orbital-wise decomposed dictionary
-
-    # Check for atom-wise decomposition
-    # + replace key for atom charge by key for atom pair charge
-    if CompKeys.charge_atom in atom_res:
-        atom_res[CompKeys.charge_ap] = atom_res[CompKeys.charge_atom]
-        del atom_res[CompKeys.charge_atom]
-    else:
-        raise ValueError("a2ap_decompose was called with a source partitioning that is NOT atom-wise!")
+    #TODO: in the function where the weights are calculated: include a way to select specific atom pairs (bonds)
 
     # Initialize dictionary with atom-pair-decomposed results
     ap_res = {}

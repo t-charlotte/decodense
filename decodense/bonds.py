@@ -18,9 +18,10 @@ from pyscf.data import radii
 
 from pyscf import tools as pyscf_tools
 
-from .tools import make_rdm1, contract, dim, make_mbo
+from .tools import make_rdm1, contract, dim, make_mbo, logger
+from .bond_criteria import get_bond_mask
 
-from typing import Union, Tuple
+from typing import Union, Tuple, Optional
 
 def bond_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
@@ -30,11 +31,17 @@ def bond_mbo(
     minao: str,
     pop_method: str,
     ndo: bool,
+    bond_crit: str = "none",           # "none", "mbo" or "lewis"
+    mbo_thresh: float = 0.1,
+    smiles: Optional[str] = None,
+    lewis_image: str = "lewis_structure.png",
+    trust_atom_order: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    This function calculates the Mayer bond orders for the given molecule.
-    It returns an array with normalized MBOs from atom to bond (atom_labels,bond_labels)
-    and an array with (non-normalized) MBOs ordered according to bond_label.
+    This function calculates the Mayer bond orders (MBOs) for the given molecule.
+    It returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
+    and an array with (non-normalized) MBOs ordered according to ap_label.
+    Atom pairs that are not bonds according to bond_crit get zero weight.
     """
 
     # RHF reference
@@ -77,9 +84,9 @@ def bond_mbo(
 
     # end if pop_method
 
-    # some useful numbers
+    # some useful quantities
     natm = pmol.natm                     # number of atoms
-    nbonds = int(natm * (natm - 1) / 2)  # number of bonds (or atom pairs)
+    npairs = int(natm * (natm - 1) / 2)  # number of atom pairs
     ao_labels = pmol.ao_labels(fmt=None)
     n_ao = len(ao_labels)                # Number of AOs
 
@@ -89,7 +96,6 @@ def bond_mbo(
     atom_of_ao[np.arange(n_ao), ao_atom_idx] = 1.0
 
     # generate the 1e RDM
-    # for an RHF reference, beta is identical to alpha, so it is not recomputed
     if pop_method in ["mulliken","mullikenmbo"]:
         mo_a = mo_coeff[0][:, alpha]
     else: # iao
@@ -97,9 +103,9 @@ def bond_mbo(
     mocc_a = mo_occ[0][alpha]
     rdm1_a = make_rdm1(mo_a, mocc_a)
 
-    if rhf:
+    if rhf: # beta is identical to alpha
         rdm1_b = rdm1_a
-    else:
+    else: # UHF or ROHF: compute beta
         if pop_method in ["mulliken","mullikenmbo"]:
             mo_b = mo_coeff[1][:, beta]
         else: # iao
@@ -107,12 +113,12 @@ def bond_mbo(
         mocc_b = mo_occ[1][beta]
         rdm1_b = make_rdm1(mo_b, mocc_b)
 
-    def _mbo_atom_to_bond(
+    def _mbo_atom_to_ap(
         mbo: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Returns an array with normalized MBOs from atom to bond (atom_labels,bond_labels)
-            and an array with (non-normalized) MBOs ordered according to bond_label.
+        Returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
+            and an array with (non-normalized) MBOs ordered according to ap_label.
         Requires an array of MBOs (atom_label_0, atom_label_1) as input.
         """
 
@@ -122,17 +128,28 @@ def bond_mbo(
         pair_vals = mbo[a_idx, b_idx]
         mbo_sorted = np.where(np.abs(pair_vals) > 1e-29, pair_vals, 0.0)
 
-        mbo_AtoB = np.zeros([natm, nbonds], dtype=np.float64)
-        bond_idx = np.arange(nbonds)
-        mbo_AtoB[a_idx, bond_idx] = mbo_sorted
-        mbo_AtoB[b_idx, bond_idx] = mbo_sorted
+        mbo_AtoAP = np.zeros([natm, npairs], dtype=np.float64)
+        ap_idx = np.arange(npairs)
+        mbo_AtoAP[a_idx, ap_idx] = mbo_sorted
+        mbo_AtoAP[b_idx, ap_idx] = mbo_sorted
+
+        # bond criterion: weights of atom pairs that are not bonds are set to zero
+        is_bond = get_bond_mask(
+            mol, mbo, bond_crit, mbo_thresh, smiles, lewis_image, trust_atom_order
+        )
+        mbo_AtoAP[:, ~is_bond] = 0.0
+
+        # TODO: atoms without bonds keep their contribution (later development step)
+        no_bonds = np.all(mbo_AtoAP == 0.0, axis=1)
+        if np.any(no_bonds):
+            logger.warning(f"Warning: atoms without bonds (weights set to zero): {np.where(no_bonds)[0]}")
 
         # normalization
-        row_sums = np.abs(mbo_AtoB.sum(axis=1))
-        row_nonzero = ~np.all(mbo_AtoB == 0.0, axis=1)
-        mbo_AtoB[row_nonzero] /= row_sums[row_nonzero, None]
+        row_sums = np.abs(mbo_AtoAP.sum(axis=1))
+        row_nonzero = ~np.all(mbo_AtoAP == 0.0, axis=1)
+        mbo_AtoAP[row_nonzero] /= row_sums[row_nonzero, None]
 
-        return mbo_AtoB, mbo_sorted
+        return mbo_AtoAP, mbo_sorted
     # end def _mbo_atom_to_bond()
 
     def _get_mulpop(
@@ -189,9 +206,9 @@ def bond_mbo(
         rdm1_a, # alpha RDM1
         rdm1_b, # beta RDM1
         )
-    mbo_AtoB, mbo_sorted = _mbo_atom_to_bond(mbo)
+    mbo_AtoAP, mbo_sorted = _mbo_atom_to_ap(mbo)
 
-    return mbo_AtoB, mbo_sorted
+    return mbo_AtoAP, mbo_sorted
 # end def bond_mbo()
 
 def orb_mbo(
