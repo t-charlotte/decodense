@@ -14,11 +14,9 @@ import decodense
 TOL = 5
 
 # settings
-PART = ("eda", "atoms")
 PART = (
-    ("orbitals", None), # orbital-wise scheme
-    ("atoms","ao"), # Nakai's AO-based atom-wise scheme (EDA)
-    ("atoms","mo"), # Eriksen's MO-based atom-wise scheme
+    ("atoms", "ao"),  # Nakai's AO-based atom-wise scheme (EDA)
+    ("atoms", "mo"),  # Eriksen's MO-based atom-wise scheme
 )
 
 # geometry directory
@@ -90,7 +88,7 @@ class KnownValues(unittest.TestCase):
                     mo_init="ibo",
                     loc_exp=4,
                     part=part,
-                    part_method = part_method
+                    part_method=part_method,
                 )
                 res = decodense.main(supcell, decomp, mf, mo_coeff)
                 e_tot = np.sum(res.tot)

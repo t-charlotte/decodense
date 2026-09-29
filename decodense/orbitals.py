@@ -168,9 +168,17 @@ def assign_rdm1s(
             with open(filename, "w") as f:
                 f.write(
                     "# partial population weights"
-                    + (" (rhf reference: beta weights identical to alpha)\n" if rhf else "\n")
+                    + (
+                        " (rhf reference: beta weights identical to alpha)\n"
+                        if rhf
+                        else "\n"
+                    )
                 )
-                f.write(f"# {'spin':>4s} {'MO':>6s} " + " ".join(f"{l:>10s}" for l in labels) + "\n")
+                f.write(
+                    f"# {'spin':>4s} {'MO':>6s} "
+                    + " ".join(f"{l:>10s}" for l in labels)
+                    + "\n"
+                )
                 for i, spin_mo in enumerate((alpha, beta)):
                     for m, j in enumerate(spin_mo):
                         f.write(
@@ -197,6 +205,7 @@ def assign_rdm1s(
 
     return weights
 
+
 def _unique_filename(stem: str, ext: str = ".txt") -> str:
     """
     this function returns f"{stem}{ext}" if it does not exist, otherwise
@@ -207,6 +216,7 @@ def _unique_filename(stem: str, ext: str = ".txt") -> str:
     try:
         import os
         import re
+
         if not os.path.exists(filename):
             return filename
         directory = os.path.dirname(stem) or "."
@@ -227,8 +237,9 @@ def _unique_filename(stem: str, ext: str = ".txt") -> str:
         )
         return filename
 
+
 def _population_mul(
-    natm: int, ao_labels: List[Tuple[int, str, str, str]], pop: np.ndarray
+    natm: int, ao_labels: list[tuple[int, str, str, str]], pop: np.ndarray
 ) -> np.ndarray:
     """
     this function returns the mulliken populations on the individual atoms
