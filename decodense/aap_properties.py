@@ -13,11 +13,11 @@ from pyscf.pbc import dft as pbc_dft
 from pyscf.pbc import gto as pbc_gto
 from pyscf.pbc import scf as pbc_scf
 from pyscf.pbc.dft import numint as pbc_numint
-from typing import List, Tuple, Dict, Union, Any, Optional
+from typing import Union, Any, Optional
 
 from .pbctools import ewald_e_nuc, get_nuc_pbc
 from .tools import dim, make_rdm1, contract
-from .decomp import CompKeys
+from .decomp import CompKeys, PROP_KEYS
 
 # block size in _mm_pot()
 BLKSIZE = 200
@@ -25,8 +25,79 @@ BLKSIZE = 200
 # max. number of atom-RDM1s per batched get_jk call (lower it to save memory)
 JK_BLKSIZE = 16
 
+def a2ap_redistribute(
+    res: dict[str, np.ndarray],
+    a2ap_weights: np.ndarray,
+    is_bond: np.ndarray,
+    atom_ref: Optional[np.ndarray] = None,
+    aap: bool = False,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """
+    this function redistributes atom-wise (aap = False) or
+    atom-and-atom-pair-wise (aap = True) energies over the bonds:
+    1. (aap only) the energy of each atom pair that is not a bond
+       is split equally over its two atoms
+    2. the atom energies are redistributed over the bonds using a2ap_weights,
+       and (aap only) the energies of the bonded atom pairs are added
+    3. (if atom_ref is given) the isolated-atom energies are redistributed in the
+       same way and subtracted from the total energy, saved under CompKeys.tot_rel
+    only the keys in PROP_KEYS are redistributed, all other keys are discarded.
+    returns:
+    - the bond-wise results, ordered according to np.where(is_bond)
+    - the atom-wise energies after step 1 (intermediates)
+    note: assumes that the rows of a2ap_weights are normalized, in order to achieve a
+    lossless decomposition (atoms without bonds have zero weights, see bond_mbo)
+    """
+    natm, npairs = a2ap_weights.shape
+    iu0, iu1 = np.triu_indices(natm, k=1)
+    nb = ~is_bond
+
+    # weights from atoms to bonds only
+    a2b_weights = a2ap_weights[:, is_bond]
+
+    bond_res: dict[str, np.ndarray] = {}
+    atom_res: dict[str, np.ndarray] = {}
+
+    for k, v in res.items():
+        if k not in PROP_KEYS:
+            continue
+        v = np.asarray(v, dtype=np.float64)
+        if aap:
+            if v.shape != (natm + npairs,):
+                raise ValueError(
+                    f"{k}: expected atom-and-atom-pair-wise array of shape "
+                    f"({natm + npairs},), got {v.shape}"
+                )
+            e_atom, e_pair = v[:natm].copy(), v[natm:]
+            # 1. split the energy of non-bonded atom pairs equally over both atoms
+            e_atom += 0.5 * (
+                np.bincount(iu0[nb], weights=e_pair[nb], minlength=natm)
+                + np.bincount(iu1[nb], weights=e_pair[nb], minlength=natm)
+            )
+            e_bond = e_pair[is_bond]
+        else:
+            if v.shape != (natm,):
+                raise ValueError(
+                    f"{k}: expected atom-wise array of shape ({natm},), got {v.shape}"
+                )
+            e_atom, e_bond = v, 0.0
+        # 2. redistribute atom energies over the bonds
+        bond_res[k] = e_atom @ a2b_weights + e_bond
+        atom_res[k] = e_atom
+
+    # 3. total energy relative to the isolated atoms
+    if atom_ref is not None:
+        bond_res[CompKeys.tot_rel] = bond_res[CompKeys.tot] - atom_ref @ a2b_weights
+
+    # atom indices of the bonds
+    bond_res[CompKeys.bonds] = np.column_stack((iu0[is_bond], iu1[is_bond]))
+
+    return bond_res, atom_res
+# end def a2ap_redistribute()
+
+
 def aap_prop_tot(
-    mol: Union[gto.Mole, pbc_gto.Cell],
+    mol: gto.Mole,
     mf: Union[
         scf.hf.SCF,
         dft.rks.KohnShamDFT,
@@ -35,32 +106,16 @@ def aap_prop_tot(
         pbc_dft.rks.RKS,
         pbc_dft.uks.UKS,
     ],
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    mo_occ: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    mo_occ: tuple[np.ndarray, np.ndarray],
     rdm1: Optional[np.ndarray],
     minao: str,
     pop_method: str,
-    prop_type: str,
-    part: str,
-    ndo: bool,
-    gauge_origin: np.ndarray,
-    weights: List[np.ndarray],
-) -> Dict[str, Union[np.ndarray, List[np.ndarray]]]:
+    weights: list[np.ndarray],
+) -> dict[str, Union[np.ndarray, list[np.ndarray]]]:
     """
     this function returns atom-and-atom-pair-decomposed mean-field properties
     """
-
-    # unsupported options
-    if isinstance(mol, pbc_gto.Cell):
-        raise NotImplementedError("AAP decomposition for periodic systems NYI!")
-    if prop_type != "energy":
-        raise NotImplementedError("AAP decomposition of dipoles NYI!")
-    # if part != "atoms": # TODO: this should not be checked, because the part will be restructured later
-    #     raise NotImplementedError(f"AAP decomposition for part = '{part}' NYI!")
-    if ndo:
-        raise NotImplementedError("AAP decomposition for NDOs NYI!")
-    if any(hasattr(mf, attr) for attr in ("mm_mol", "with_solvent", "h1e_mmpol")):
-        raise NotImplementedError("AAP decomposition for solvation energies NYI!")
 
     # restricted reference
     if mo_occ[0].size == mo_occ[1].size:
@@ -95,15 +150,6 @@ def aap_prop_tot(
 
     natm = pmol.natm
     npairs = int(natm * (natm - 1) / 2)
-
-    # effective atomic charges
-    if part in ["atoms", "eda"]:
-        charge_atom = (
-            -(np.sum(weights[0], axis=0) + np.sum(weights[1], axis=0))
-            + pmol.atom_charges()
-        )
-    else:
-        charge_atom = 0.0
 
     # nuclear repulsion property
     prop_nuc_rep = _e_nuc_ap(pmol)
@@ -151,7 +197,7 @@ def aap_prop_tot(
     # end if dft_calc
 
     # perform decomposition
-    prop: Dict[str, Union[np.ndarray, List[np.ndarray]]]
+    prop: dict[str, Union[np.ndarray, list[np.ndarray]]]
 
     spin_mos = (alpha, beta)
 
@@ -228,44 +274,11 @@ def aap_prop_tot(
     # end if dft_calc
 
     prop[CompKeys.struct] = np.concatenate((np.zeros(natm, dtype=np.float64), prop_nuc_rep))
+    prop[CompKeys.tot] = prop[CompKeys.el] + prop[CompKeys.struct]
 
-    return {**prop, CompKeys.charge_atom: np.append(charge_atom, np.zeros((npairs), dtype=np.float64))}
+    return {**prop}
 # end aap_prop_tot
 
-def bond_prop_tot(
-    mbo: np.ndarray,
-    aap_res: Dict[str, Any],
-    smiles: str
-):
-    from rdkit import Chem
-
-    # Generate RDKit molecule object
-    params = Chem.SmilesParserParams()
-    params.removeHs = False # do not remove hydrogen atoms
-
-    mol = Chem.MolFromSmiles(smiles, params)
-    mol = Chem.AddHs(mol)
-
-    natm = mol.GetNumAtoms()
-    nbond = mol.GetNumBonds()
-
-    # Generate dictionary for bond label to bond index and atom labels
-    # Structure: b_idces[b_label] = [b_idx, a_label_0, a_label_1]
-
-    return
-# end bond_prop_tot
-
-
-def _e_nuc(mol: gto.Mole) -> np.ndarray:
-    """
-    this function returns the nuclear repulsion energy
-    """
-    # coordinates and charges of nuclei
-    charges = mol.atom_charges()
-    # internuclear distances (with self-repulsion removed)
-    dist = gto.inter_distance(mol)
-    dist[np.diag_indices_from(dist)] = 1e200
-    return contract("i,ij,j->i", charges, 1.0 / dist, charges) * 0.5
 
 def _e_nuc_ap(mol: gto.Mole) -> np.ndarray:
     """
@@ -281,12 +294,12 @@ def _e_nuc_ap(mol: gto.Mole) -> np.ndarray:
     return enuc[np.triu_indices(mol.natm,k=1)]
 
 def _atom_rdm1(
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    mo_occ: Tuple[np.ndarray, np.ndarray],
-    weights: List[np.ndarray],
-    spin_mos: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    mo_occ: tuple[np.ndarray, np.ndarray],
+    weights: list[np.ndarray],
+    spin_mos: tuple[np.ndarray, np.ndarray],
     natm: int,
-) -> Tuple[np.ndarray, List[np.ndarray]]:
+) -> tuple[np.ndarray, list[np.ndarray]]:
     """
     this function calculates:
     - the atom-specific RDM1s - shape (2, natm, nao, nao)
@@ -317,7 +330,7 @@ def _e_jk_atoms(
     rdm1_atom_tot: np.ndarray,
     restrict: bool,
     blksize: int = JK_BLKSIZE,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     this function calculates atom-atom Coulomb and exchange energy matrices:
     coul[a,b] = 1/2 tr(J[D_a] D_b)
@@ -361,9 +374,9 @@ def _e_jk_atoms(
 def _orb_energies(
     ao0: np.ndarray,
     weps: np.ndarray,
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    spin_mos: Tuple[np.ndarray, np.ndarray],
-) -> List[np.ndarray]:
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    spin_mos: tuple[np.ndarray, np.ndarray],
+) -> list[np.ndarray]:
     """
     this function calculates orbital energies e_m = sum_r weps(r) |phi_m(r)|^2
     for a given weighted energy density weps(r) = w(r) eps(r)
@@ -377,11 +390,11 @@ def _xc_orb_energies(
     mol: gto.Mole,
     mf: dft.rks.KohnShamDFT,
     rdm1: np.ndarray,
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    spin_mos: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    spin_mos: tuple[np.ndarray, np.ndarray],
     xc_type: str,
     ao_deriv: int,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """
     this function calculates orbital xc energies e_m = sum_r w(r) eps_xc(r) |phi_m(r)|^2
     block-wise on the DFT grid (ao values are never stored for the full grid)
@@ -403,20 +416,12 @@ def _xc_orb_energies(
             e_orb[i] += e
     return e_orb
 
-def _dip_nuc(mol: gto.Mole, gauge_origin: np.ndarray) -> np.ndarray:
-    """
-    this function returns the nuclear contribution to the molecular dipole moment
-    """
-    # coordinates and formal/actual charges of nuclei
-    coords = mol.atom_coords()
-    form_charges = mol.atom_charges()
-    return contract("i,ix->ix", form_charges, coords - gauge_origin)
 
 
 def _h_core(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.RHF],
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
     this function returns the components of the core hamiltonian
     """
@@ -453,121 +458,7 @@ def _get_nuc(mol: gto.Mole) -> np.ndarray:
     return sub_nuc
 
 
-def _solvent(
-    mol: Union[gto.Mole, pbc_gto.Cell],
-    mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.RHF],
-    rdm1: np.ndarray,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
-    # initialize
-    pot_solv, nuc_solv, vdW_solv = None, None, None
-
-    # point charges
-    if hasattr(mf, "mm_mol"):
-        mm_mol = getattr(mf, "mm_mol", None)
-        pot_solv, nuc_solv = _point_charges(mol, mm_mol)
-    # pcm
-    elif hasattr(mf, "with_solvent"):
-        pot_solv, nuc_solv = _pcm(mol, rdm1, mf.with_solvent)
-    # OpenMM polarizable embedding
-    elif hasattr(mf, "h1e_mmpol"):
-        # static contribution to one-electron Hamiltonian
-        pot_solv = getattr(mf, "h1e_mmpol").copy()
-
-        # static nuclear contribution
-        nuc_solv = np.array(
-            [
-                mf.V_mm_at_nucl[i] * mol.atom_charges()[i]
-                for i in range(len(mol.atom_charges()))
-            ]
-        )
-
-        # QM-MM vdW potential
-        vdW_solv = mf.ommp_qm_helper.vdw_energy_by_atom(mf.ommp_obj)
-
-        # polarization contributions
-        if hasattr(mf, "v_mmpol_d"):
-            # IPD contribution to the Fock Matrix
-            pot_solv += 0.5 * getattr(mf, "v_mmpol_d")
-
-            # polarization contribution from the potential of the IPDs at the nuclei
-            nuc_solv += 0.5 * np.array(
-                [
-                    mf.V_pol_at_nucl[i] * mol.atom_charges()[i]
-                    for i in range(len(mol.atom_charges()))
-                ]
-            )
-
-    return pot_solv, nuc_solv, vdW_solv
-
-
-def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    this function returns the full mm potential and the nuclei interaction with the
-    point charges (adapted from: qmmm/itrf.py:get_hcore() in PySCF)
-    """
-    # settings
-    coords = mm_mol.atom_coords()
-    charges = mm_mol.atom_charges()
-    blksize = BLKSIZE
-    # integrals
-    intor = "int3c2e_cart" if mol.cart else "int3c2e_sph"
-    cintopt = gto.moleintor.make_cintopt(mol._atm, mol._bas, mol._env, intor)
-    # compute interaction potential
-    nao = mol.nao_nr()
-    mm_pot = np.zeros(nao * (nao + 1) // 2, dtype=np.float64)
-    for i0, i1 in lib.prange(0, charges.size, blksize):
-        fakemol = gto.fakemol_for_charges(coords[i0:i1])
-        j3c = df.incore.aux_e2(mol, fakemol, intor=intor, aosym="s2ij", cintopt=cintopt)
-        mm_pot += np.einsum("xk,k->x", j3c, -charges[i0:i1])
-    mm_pot = lib.unpack_tril(mm_pot)
-    # nuclei interaction with point charges
-    atom_charges = mol.atom_charges()
-    atom_coords = mol.atom_coords()
-    nuc_solv = np.zeros(len(mol.atom))
-    mm_atom_charges = mm_mol.atom_charges()
-    mm_atom_coords = mm_mol.atom_coords()
-    for j in range(mol.natm):
-        q2, r2 = atom_charges[j], atom_coords[j]
-        r = lib.norm(r2 - mm_atom_coords, axis=1)
-        nuc_solv[j] = q2 * np.sum(mm_atom_charges / r)
-    return mm_pot, nuc_solv
-
-
-def _pcm(
-    mol: gto.Mole, rdm1: np.ndarray, solvent_model: solvent.PCM
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    this function returns the pcm potential matrix and the nuclei interaction with the
-    solvent (adapted from: solvent/pcm.py:_get_vind() in PySCF)
-    """
-    surface = solvent_model.surface
-    nao = mol.nao_nr()
-    rdm1 = rdm1.reshape(-1, nao, nao)
-    if rdm1.shape[0] == 2:
-        rdm1 = (rdm1[0] + rdm1[1]).reshape(-1, nao, nao)
-    # get the electronic part of the potential
-    vmat_e = 0.5 * solvent_model._get_vind(np.sum(rdm1, axis=0))[1]
-    # calculate the cavity surface charges
-    K = solvent_model._intermediates["K"]
-    R = solvent_model._intermediates["R"]
-    v_grids_e = solvent_model._get_v(rdm1)
-    v_grids_n = solvent_model.v_grids_n
-    v_grids = v_grids_n - v_grids_e
-    b = np.dot(R, v_grids.T)
-    q = np.linalg.solve(K, b).T
-    vK_1 = np.linalg.solve(K.T, v_grids.T)
-    qt = np.dot(R.T, vK_1).T
-    q_sym = (q + qt) / 2.0
-    # get the nuclear part of the potential
-    nuc_solv_pcm = np.zeros(mol.natm)
-    for j in range(mol.natm):
-        q2, r2 = mol.atom_charges()[j], mol.atom_coords()[j]
-        r = lib.norm(r2 - surface["grid_coords"], axis=1)
-        nuc_solv_pcm[j] = 0.5 * q2 * np.sum(q_sym / r)
-    return vmat_e, nuc_solv_pcm
-
-
-def _xc_ao_deriv(xc_func: str) -> Tuple[str, int]: #TODO: fix UnboundLocalError for xc="HF" or any unknown functional type
+def _xc_ao_deriv(xc_func: str) -> tuple[str, int]: #TODO: fix UnboundLocalError for xc="HF" or any unknown functional type
     """
     this function returns the type of xc functional and the level of ao derivatives
     needed
@@ -586,7 +477,7 @@ def _xc_ao_deriv(xc_func: str) -> Tuple[str, int]: #TODO: fix UnboundLocalError 
 
 def _make_rho_interm1(
     ao_value: np.ndarray, rdm1: np.ndarray, xc_type: str
-) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, Optional[np.ndarray]]:
     """
     this function returns the rho intermediates (c0, c1) needed in _make_rho()
     (adpated from: dft/numint.py:eval_rho() in PySCF)
@@ -652,7 +543,7 @@ def _make_rho_interm2(
 
 def _make_rho(
     ao_value: np.ndarray, rdm1: np.ndarray, xc_type: str
-) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
+) -> tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
     """
     this function returns important dft intermediates, e.g., energy density, grid
     weights, etc.

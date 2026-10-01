@@ -5,11 +5,6 @@
 main mf_decomp program
 """
 
-__author__ = "Janus Juul Eriksen, Technical University of Denmark, DK"
-__maintainer__ = "Janus Juul Eriksen"
-__email__ = "janus@kemi.dtu.dk"
-__status__ = "Development"
-
 import numpy as np
 from pyscf import gto, scf, dft
 from pyscf.pbc import dft as pbc_dft
@@ -69,6 +64,7 @@ def main(
             mo_occ = tuple(mo_occ)
 
     scheme = SCHEMES[(decomp.part, decomp.part_method)]
+    decomp.res_inter = {}  # reset intermediates of a previous run
     decomp.res = scheme(mol, mf, mo_coeff, mo_occ, rdm1, decomp)
 
     return ResultsCls(mol, decomp)

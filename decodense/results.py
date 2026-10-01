@@ -5,11 +5,6 @@
 results module
 """
 
-__author__ = "Janus Juul Eriksen, Technical University of Denmark, DK"
-__maintainer__ = "Janus Juul Eriksen"
-__email__ = "janus@kemi.dtu.dk"
-__status__ = "Development"
-
 import numpy as np
 import pandas as pd
 from pyscf import gto
@@ -31,20 +26,33 @@ class ResultsCls:
     class that holds decodense results
     """
 
-    def __init__(self, mol: gto.Mole, decomp: DecompCls):
+    def __init__(
+        self,
+        mol: gto.Mole,
+        decomp: DecompCls,
+        res: Optional[dict[str, Any]] = None,
+        part: Optional[str] = None,
+    ):
         self.mol = mol
-        self.res_dict = decomp.res
+        self.res_dict = decomp.res if res is None else res
         self.print_unit = decomp.unit
         self.ndo = decomp.ndo
-        self.part = decomp.part
+        self.part = decomp.part if part is None else part
         for key, value in self.res_dict.items():
             setattr(self, comp_key_dict[key], value)
+        # atom-wise intermediates of bond-wise decompositions (separate results object)
+        self.intermediates: Optional[ResultsCls] = None
+        if res is None and self.part == "bonds" and decomp.res_inter:
+            self.intermediates = ResultsCls(mol, decomp, res=decomp.res_inter, part="atoms")
 
     def __str__(self):
         """
         build a string from a pandas dataframe built from the results
         """
-        return str(self.to_dataframe())
+        string = str(self.to_dataframe())
+        if self.intermediates is not None:
+            string += "\n\nintermediates (atom-wise):\n" + str(self.intermediates)
+        return string
 
     def to_dataframe(self) -> pd.DataFrame:
         """
@@ -110,7 +118,7 @@ def fmt(
     elif part == "orbitals":
         return orbs(mol, res, unit, ndo)
     elif part == "bonds":
-        return bonds()  # TODO: implement later, leave as placeholder for now
+        return bonds(mol, res, unit)
     else:
         raise ValueError(f"Invalid partitioning in results.py: {part!r}")
 
@@ -139,7 +147,7 @@ def atoms(mol: gto.Mole, res: dict[str, Any], unit: str) -> pd.DataFrame:
     atom-based partitioning
     """
     # property type
-    scalar_prop = res[CompKeys.el].ndim == 1
+    scalar_prop = np.ndim(res.get(CompKeys.el, next(iter(res.values())))) == 1
 
     # units
     scaling = _unit_scaling(scalar_prop, unit)
@@ -225,8 +233,28 @@ def orbs(mol: gto.Mole, res: dict[str, Any], unit: str, ndo: bool) -> pd.DataFra
     return pd.DataFrame.from_dict(prop).set_index(CompKeys.orbitals)
 
 
-def bonds():
-    raise NotImplementedError(
-        "Bond-wise decomposition schemes are not yet implemented!"
-    )
-    return
+def bonds(mol: gto.Mole, res: dict[str, Any], unit: str) -> pd.DataFrame:
+    """
+    bond-based partitioning
+    """
+    # property type
+    scalar_prop = res[CompKeys.el].ndim == 1
+    if not scalar_prop:
+        raise NotImplementedError("Bond-wise decomposition of dipoles NYI!")
+
+    # units
+    scaling = _unit_scaling(scalar_prop, unit)
+
+    # property contributions
+    prop = {
+        comp_key: res[comp_key] * scaling
+        for comp_key in res.keys()
+        if comp_key != CompKeys.bonds
+    }
+    # bond labels, e.g. "C0-O1"
+    prop[CompKeys.bonds] = [
+        f"{mol.atom_symbol(a)}{a}-{mol.atom_symbol(b)}{b}" for a, b in res[CompKeys.bonds]
+    ]
+
+    # return as dataframe
+    return pd.DataFrame.from_dict(prop).set_index(CompKeys.bonds)

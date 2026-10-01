@@ -5,11 +5,6 @@
 orbitals module
 """
 
-__author__ = "Janus Juul Eriksen, Technical University of Denmark, DK"
-__maintainer__ = "Janus Juul Eriksen"
-__email__ = "janus@kemi.dtu.dk"
-__status__ = "Development"
-
 import numpy as np
 from pyscf import gto, scf, dft, lo
 from pyscf.pbc import dft as pbc_dft
@@ -19,6 +14,8 @@ from typing import Union
 
 from .tools import dim, contract, logger
 
+# minimal verbosity for which the (partial) atomic populations are returned
+VERBOSE_POP = 2
 
 def assign_rdm1s(
     mol: Union[gto.Mole, pbc_gto.Cell],
@@ -152,7 +149,7 @@ def assign_rdm1s(
             break
 
     # verbose print
-    if 0 < verbose:
+    if verbose >= VERBOSE_POP:
         labels = [f"{pmol.atom_pure_symbol(k)}{k}" for k in range(pmol.natm)]
 
         # atomic populations (sum over both spins, also correct for rhf)

@@ -5,11 +5,6 @@
 properties module
 """
 
-__author__ = "Janus Juul Eriksen, Technical University of Denmark, DK"
-__maintainer__ = "Janus Juul Eriksen"
-__email__ = "janus@kemi.dtu.dk"
-__status__ = "Development"
-
 import copy
 import numpy as np
 from itertools import starmap
@@ -469,29 +464,6 @@ def prop_tot(
             CompKeys.mo_occ: [mo_occ[0][alpha], mo_occ[1][beta]],
             CompKeys.orbsym: orbsym(mol, (mo_coeff[0][:, alpha], mo_coeff[1][:, beta])),
         }
-
-def a2ap_decompose(
-    atom_res: Dict[str, Union[np.ndarray, List[np.ndarray]]],
-    a2ap_weights: np.ndarray,
-) -> Dict[str, Union[np.ndarray, List[np.ndarray]]]:
-    """
-    This function takes a dictionary of atom-wise results
-    and redistributes them over the atom pairs using the provided weights.
-    Note: assumes that the weights are normalized, in order to achieve a losless decomposition.
-    """
-    #TODO: somehow add a way to prevent this function being called with an orbital-wise decomposed dictionary
-    #TODO: in the function where the weights are calculated: include a way to select specific atom pairs (bonds)
-
-    # Initialize dictionary with atom-pair-decomposed results
-    ap_res = {}
-
-    # Loop over the entries of the atom-decomposed results dictionary
-    keyslist = list(atom_res.keys())
-
-    for k in keyslist:
-        ap_res[k] = atom_res[k] @ a2ap_weights #NOTE: this only works for energies so far. TODO: add for dipoles
-
-    return ap_res
 
 def _e_nuc(mol: gto.Mole) -> np.ndarray:
     """

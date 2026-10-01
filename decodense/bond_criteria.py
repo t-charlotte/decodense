@@ -13,11 +13,14 @@ from pyscf.data import radii
 
 from .tools import logger
 
-from typing import Union, Tuple, Optional
+from typing import Union, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING: # only for type annotations, RDKit remains optional
+    from rdkit import Chem
 
 def get_bond_mask(
     mol: Union[gto.Mole, pbc_gto.Cell],
-    mbo: np.ndarray,
+    mbo: Optional[np.ndarray],
     bond_crit: str = "none",           # "none", "mbo" or "lewis"
     mbo_thresh: float = 0.1,
     smiles: Optional[str] = None,
@@ -33,17 +36,12 @@ def get_bond_mask(
     - bond_crit = "none": assume all atom pairs are bonds
     - bond_crit = "mbo": an atom pair is a bond if the bond order is above a certain threshold
     - bond_crit = "lewis": an atom pair is a bond if the Lewis structure shows a bond (see lewis_bond_mask)
+    
     """
-
-    if bond_crit not in ("none", "mbo", "lewis"):
-        raise ValueError("invalid bond criterion. valid choices: `none`, `mbo` or `lewis`")
     if bond_crit == "lewis" and isinstance(mol, pbc_gto.Cell):
-        raise NotImplementedError("Lewis bond criterion is not implemented for PBC")
-    if bond_crit == "lewis" and trust_atom_order and smiles is None:
-        raise ValueError("trust_atom_order requires a SMILES string")
+        raise NotImplementedError('Lewis bond criterion is not implemented for PBC')
 
-    natm = mol.natm
-    a_idx, b_idx = np.triu_indices(natm, k=1)
+    a_idx, b_idx = np.triu_indices(mol.natm, k=1)
 
     if bond_crit == "mbo":
         is_bond = mbo[a_idx, b_idx] > mbo_thresh
@@ -55,7 +53,7 @@ def get_bond_mask(
     return is_bond
 # end def get_bond_mask()
 
-def _pyscf_to_rdkit(mol: gto.Mole):
+def _pyscf_to_rdkit(mol: gto.Mole) -> "Chem.Mol":
     """
     this function returns an RDKit molecule (without bond objects)
     with the same atom numbering as the pyscf mol
@@ -70,7 +68,7 @@ def _pyscf_to_rdkit(mol: gto.Mole):
     return Chem.MolFromXYZBlock(xyz)
 # end def _pyscf_to_rdkit()
 
-def _save_lewis_image(rdkit_mol, fname: str) -> None:
+def _save_lewis_image(rdkit_mol: "Chem.Mol", fname: str) -> None:
     """
     this function saves an image of the Lewis structure, with atoms labelled by their pyscf index
     """
@@ -86,7 +84,7 @@ def _save_lewis_image(rdkit_mol, fname: str) -> None:
     logger.info(f"Saved image of Lewis structure to \"{fname}\"")
 # end def _save_lewis_image()
 
-def _connectivity(mol_smiles):
+def _connectivity(mol_smiles: "Chem.Mol") -> "Chem.RWMol":
     """
     this function returns a copy of the RDKit molecule
     that was generated from the SMILES string
@@ -109,12 +107,12 @@ def _connectivity(mol_smiles):
 # end def _connectivity()
 
 def _best_match(
-    connect_proposal, 
-    connect_smiles,
+    connect_proposal: "Chem.Mol",
+    connect_smiles: "Chem.Mol",
     coords: np.ndarray,
     r_cov: np.ndarray,
     max_matches: int = 10000,
-) -> Optional[Tuple[int, ...]]:
+) -> Optional[tuple[int, ...]]:
     """
     this function finds the best match for linking the pyscf atom numbering
     to the SMILES atom numbering.

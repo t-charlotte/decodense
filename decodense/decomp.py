@@ -5,11 +5,6 @@
 decomp module
 """
 
-__author__ = "Janus Juul Eriksen, Technical University of Denmark, DK"
-__maintainer__ = "Janus Juul Eriksen"
-__email__ = "janus@kemi.dtu.dk"
-__status__ = "Development"
-
 import numpy as np
 from pyscf import gto, scf, dft
 from pyscf.pbc import gto as pbc_gto
@@ -19,11 +14,11 @@ from typing import Union, Optional
 from .tools import logger
 
 
-# component keys
-class CompKeys:
+# property components (additive per atom / atom pair / bond); redistributed in bond-wise schemes
+class PropKeys:
     coul = "Coul."
     exch = "Exch."
-    exch_DFT = "Exch. (DFT)",
+    exch_DFT = "Exch. (DFT)"
     kin = "Kin."
     solvent = "Solv."
     solvent_vdw = "Solv. (vdW)"
@@ -35,31 +30,40 @@ class CompKeys:
     struct = "Struct."
     el = "Elect."
     tot = "Total"
+    tot_rel = "Total (rel.)"
+
+
+# labels, occupations, symmetries and intermediates; never redistributed
+class InfoKeys:
     atoms = "Atom"
     orbitals = "Orbital"
+    bonds = "Bond"
     mo_occ = "Occup."
     orbsym = "Symm."
+    atom_tot = "Total (atom)"
+    atom_ref = "E_atom (iso.)"
 
 
+# all component keys; add new keys to PropKeys or InfoKeys, not here
+class CompKeys(PropKeys, InfoKeys):
+    pass
+
+
+def _key_values(cls) -> tuple[str, ...]:
+    """
+    this function returns the values of the keys defined in cls
+    """
+    return tuple(v for k, v in vars(cls).items() if not k.startswith("__"))
+
+
+PROP_KEYS = frozenset(_key_values(PropKeys))
+
+# maps every key value to the attribute name used in ResultsCls
 comp_key_dict = {
-    "Coul.": "coul",
-    "Exch.": "exch",
-    "Exch. (DFT)": "exch_dft",
-    "Kin.": "kin",
-    "Solv.": "solvent",
-    "Solv. (vdW)": "solvent_vdw",
-    "E_ne (1)": "nuc_att_glob",
-    "E_ne (2)": "nuc_att_loc",
-    "E_ne": "nuc_att",
-    "XC": "xc",
-    "XC (nlc)": "xc_nlc",
-    "Struct.": "struct",
-    "Elect.": "el",
-    "Total": "tot",
-    "Atom": "atoms",
-    "Orbital": "orbitals",
-    "Occup.": "mo_occ",
-    "Symm.": "orbsym",
+    v: k.lower()
+    for cls in (PropKeys, InfoKeys)
+    for k, v in vars(cls).items()
+    if not k.startswith("__")
 }
 
 
@@ -84,6 +88,13 @@ class DecompCls:
         "verbose",
         "unit",
         "res",
+        "res_inter",
+        # below: exclusively for bond-wise decomposition schemes
+        "bond_crit",
+        "mbo_thresh",
+        "smiles",
+        "lewis_image",
+        "trust_atom_order",
     )
 
     def __init__(
@@ -102,6 +113,11 @@ class DecompCls:
         writename: str = "",
         verbose: int = 0,
         unit: str = "au",
+        bond_crit: str = "none", # "none", "mbo" or "lewis"
+        mbo_thresh: Optional[float] = None,
+        smiles: Optional[str] = None,
+        lewis_image: str = "lewis_structure.png",
+        trust_atom_order: bool = False
     ) -> None:
         """
         init molecule attributes
@@ -118,6 +134,12 @@ class DecompCls:
                 'Warning: part="eda" is deprecated; use part="atoms", part_method="ao" instead'
             )
             part, part_method = "atoms", "ao"
+        elif part == "bonds":
+            self.bond_crit = bond_crit
+            self.mbo_thresh = mbo_thresh
+            self.smiles = smiles
+            self.lewis_image = lewis_image
+            self.trust_atom_order = trust_atom_order
         # end if
         if part_method is None:
             part_method = {"atoms": "mo"}.get(part)
@@ -137,6 +159,7 @@ class DecompCls:
         self.unit = unit
         # set internal defaults
         self.res: dict[str, Union[np.ndarray, list[np.ndarray]]] = {}
+        self.res_inter: dict[str, np.ndarray] = {}
 
 
 def sanity_check(
@@ -205,9 +228,31 @@ def sanity_check(
                 'invalid partitioning method. valid choices for part="bonds": '
                 '"a2b" (atoms-to-bonds) or "aap2b" (atoms-and-atom-pairs-to-bonds)'
             )
+        if decomp.pop_method not in ("mulliken", "iao"):
+            raise ValueError(
+                'invalid population scheme for part="bonds". valid choices: "mulliken" or '
+                '"iao" (Mayer bond orders are only implemented for these schemes)'
+            )
+        if decomp.bond_crit not in ("none", "mbo", "lewis"):
+            raise ValueError(
+                'invalid bond criterion. valid choices: "none" (default), "mbo" or "lewis"'
+            )
+        if decomp.bond_crit == "lewis":
+            try:
+                import rdkit  # noqa: F401
+            except ImportError as err:
+                raise ImportError('bond criterion "lewis" requires RDKit') from err
+        if decomp.bond_crit == "mbo" and (decomp.mbo_thresh is None or decomp.mbo_thresh <= 0):
+            raise ValueError(
+                'bond-order-based bond criterion requires a bond order threshold > 0'
+            )
+        if decomp.bond_crit == "lewis" and decomp.trust_atom_order and decomp.smiles is None:
+            raise ValueError(
+                'trust_atom_order requires a SMILES string'
+            )
     else:
         raise ValueError(
-            'invalid partitioning. valid choices: "atoms" (default) or "orbitals"'  # TODO: add "bonds" here later, once it is implemented
+            'invalid partitioning. valid choices: "atoms" (default), "orbitals" or "bonds"'
         )
     # NDO decomposition
     if not isinstance(decomp.ndo, bool):

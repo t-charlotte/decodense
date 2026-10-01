@@ -21,26 +21,28 @@ from pyscf import tools as pyscf_tools
 from .tools import make_rdm1, contract, dim, make_mbo, logger
 from .bond_criteria import get_bond_mask
 
-from typing import Union, Tuple, Optional
+from typing import Union, Optional
 
 def bond_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.hf.RHF, pbc_dft.rks.RKS],
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    mo_occ: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    mo_occ: tuple[np.ndarray, np.ndarray],
     minao: str,
     pop_method: str,
     ndo: bool,
-    bond_crit: str = "none",           # "none", "mbo" or "lewis"
-    mbo_thresh: float = 0.1,
-    smiles: Optional[str] = None,
-    lewis_image: str = "lewis_structure.png",
-    trust_atom_order: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
+    # input variables below: default value is controlled
+    # by __init__ in decomp.py
+    bond_crit: str,
+    mbo_thresh: float,
+    smiles: Optional[str],
+    lewis_image: str,
+    trust_atom_order: bool,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     This function calculates the Mayer bond orders (MBOs) for the given molecule.
     It returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
-    and an array with (non-normalized) MBOs ordered according to ap_label.
+    and a boolean array (ordered according to ap_label) that is True for bonds according to bond_crit.
     Atom pairs that are not bonds according to bond_crit get zero weight.
     """
 
@@ -115,10 +117,10 @@ def bond_mbo(
 
     def _mbo_atom_to_ap(
         mbo: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
-            and an array with (non-normalized) MBOs ordered according to ap_label.
+            and a boolean array (ordered according to ap_label) that is True for bonds.
         Requires an array of MBOs (atom_label_0, atom_label_1) as input.
         """
 
@@ -139,17 +141,20 @@ def bond_mbo(
         )
         mbo_AtoAP[:, ~is_bond] = 0.0
 
-        # TODO: atoms without bonds keep their contribution (later development step)
+        # atoms without bonds: their energy is discarded in the bond-wise decomposition
         no_bonds = np.all(mbo_AtoAP == 0.0, axis=1)
         if np.any(no_bonds):
-            logger.warning(f"Warning: atoms without bonds (weights set to zero): {np.where(no_bonds)[0]}")
+            logger.warning(
+                f"Warning: atoms without bonds: {np.where(no_bonds)[0]}. Their energies are "
+                "discarded, so the bond-wise energies do not sum up to the total energy."
+            )
 
         # normalization
         row_sums = np.abs(mbo_AtoAP.sum(axis=1))
         row_nonzero = ~np.all(mbo_AtoAP == 0.0, axis=1)
         mbo_AtoAP[row_nonzero] /= row_sums[row_nonzero, None]
 
-        return mbo_AtoAP, mbo_sorted
+        return mbo_AtoAP, is_bond
     # end def _mbo_atom_to_bond()
 
     def _get_mulpop(
@@ -206,16 +211,16 @@ def bond_mbo(
         rdm1_a, # alpha RDM1
         rdm1_b, # beta RDM1
         )
-    mbo_AtoAP, mbo_sorted = _mbo_atom_to_ap(mbo)
+    mbo_AtoAP, is_bond = _mbo_atom_to_ap(mbo)
 
-    return mbo_AtoAP, mbo_sorted
+    return mbo_AtoAP, is_bond
 # end def bond_mbo()
 
 def orb_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.hf.RHF, pbc_dft.rks.RKS],
-    mo_coeff: Tuple[np.ndarray, np.ndarray],
-    mo_occ: Tuple[np.ndarray, np.ndarray],
+    mo_coeff: tuple[np.ndarray, np.ndarray],
+    mo_occ: tuple[np.ndarray, np.ndarray],
     minao: str,
     pop_method: str,
     ndo: bool,
@@ -282,7 +287,7 @@ def orb_mbo(
     def _get_mbo(
         mocc_k: float,
         atom_w_k: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         returns the Mayer bond orders for a single occupied (spin-)orbital
 
@@ -399,7 +404,7 @@ def orb_mbo(
 
     def _mbo_atom_to_bond(
         mbo: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns an array with normalized MBOs from atom to bond -- dim = (atom_labels,bond_labels)
         """
