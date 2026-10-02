@@ -56,7 +56,6 @@ def a2ap_redistribute(
     a2b_weights = a2ap_weights[:, is_bond]
 
     bond_res: dict[str, np.ndarray] = {}
-    atom_res: dict[str, np.ndarray] = {}
 
     for k, v in res.items():
         if k not in PROP_KEYS:
@@ -83,7 +82,6 @@ def a2ap_redistribute(
             e_atom, e_bond = v, 0.0
         # 2. redistribute atom energies over the bonds
         bond_res[k] = e_atom @ a2b_weights + e_bond
-        atom_res[k] = e_atom
 
     # 3. total energy relative to the isolated atoms
     if atom_ref is not None:
@@ -92,7 +90,7 @@ def a2ap_redistribute(
     # atom indices of the bonds
     bond_res[CompKeys.bonds] = np.column_stack((iu0[is_bond], iu1[is_bond]))
 
-    return bond_res, atom_res
+    return bond_res
 # end def a2ap_redistribute()
 
 

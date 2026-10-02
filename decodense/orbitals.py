@@ -12,9 +12,9 @@ from pyscf.pbc import gto as pbc_gto
 from pyscf.pbc import scf as pbc_scf
 from typing import Union
 
-from .tools import dim, contract, logger
+from .tools import dim, contract, logger, unique_filename
 
-# minimal verbosity for which the (partial) atomic populations are returned
+# minimal verbosity for returning the (partial) atomic populations
 VERBOSE_POP = 2
 
 def assign_rdm1s(
@@ -160,7 +160,7 @@ def assign_rdm1s(
         logger.info(f"  {'sum':>8s}   {np.sum(total):10.5f}")
 
         # full weight matrix to file (alpha only for rhf, since beta is identical)
-        filename = _unique_filename(f"pop_weights_{pop_method}")
+        filename = unique_filename(f"pop_weights_{pop_method}")
         try:
             with open(filename, "w") as f:
                 f.write(
@@ -191,48 +191,16 @@ def assign_rdm1s(
                     + " ".join(f"{w:10.5f}" for w in total)
                     + "\n"
                 )
-            logger.info(f"\n full population weight matrix written to {filename}")
+            logger.info(f"\n full population weight matrix written to {filename}\n")
         except OSError as err:
             # a failed write of this diagnostic file should not abort the decomposition
             logger.info(
                 f"\n WARNING: could not write population weight matrix to {filename} "
-                f"({type(err).__name__}: {err})"
+                f"({type(err).__name__}: {err})\n"
             )
     # end verbose print
 
     return weights
-
-
-def _unique_filename(stem: str, ext: str = ".txt") -> str:
-    """
-    this function returns f"{stem}{ext}" if it does not exist, otherwise
-    f"{stem}_{n}{ext}" with n one larger than the highest existing number.
-    on any error, a warning is issued and f"{stem}{ext}" is returned
-    """
-    filename = f"{stem}{ext}"
-    try:
-        import os
-        import re
-
-        if not os.path.exists(filename):
-            return filename
-        directory = os.path.dirname(stem) or "."
-        pattern = re.compile(
-            rf"^{re.escape(os.path.basename(stem))}_(\d+){re.escape(ext)}$"
-        )
-        numbers = [
-            int(match.group(1))
-            for name in os.listdir(directory)
-            if (match := pattern.match(name))
-        ]
-        return f"{stem}_{max(numbers, default=0) + 1}{ext}"
-    except Exception as err:
-        logger.info(
-            f"\n WARNING: could not determine a unique filename "
-            f"({type(err).__name__}: {err}); falling back to {filename}, "
-            "which may overwrite an existing file"
-        )
-        return filename
 
 
 def _population_mul(

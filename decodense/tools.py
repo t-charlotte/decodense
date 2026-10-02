@@ -99,6 +99,39 @@ def git_version() -> str:
     return result.stdout.strip().decode("ascii")
 
 
+def unique_filename(stem: str, ext: str = ".txt") -> str:
+    """
+    this function determines a unique filename for when the logger needs to write to a file
+    it returns f"{stem}{ext}" if it does not exist, otherwise
+    f"{stem}_{n}{ext}" with n one larger than the highest existing number.
+    on any error, a warning is issued and f"{stem}{ext}" is returned
+    """
+    filename = f"{stem}{ext}"
+    try:
+        import os
+        import re
+
+        if not os.path.exists(filename):
+            return filename
+        directory = os.path.dirname(stem) or "."
+        pattern = re.compile(
+            rf"^{re.escape(os.path.basename(stem))}_(\d+){re.escape(ext)}$"
+        )
+        numbers = [
+            int(match.group(1))
+            for name in os.listdir(directory)
+            if (match := pattern.match(name))
+        ]
+        return f"{stem}_{max(numbers, default=0) + 1}{ext}"
+    except Exception as err:
+        logger.info(
+            f"\n WARNING: could not determine a unique filename "
+            f"({type(err).__name__}: {err}); falling back to {filename}, "
+            "which may overwrite an existing file"
+        )
+        return filename
+
+
 def dim(mo_occ: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """
     determine molecular dimensions

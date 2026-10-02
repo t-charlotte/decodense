@@ -36,12 +36,13 @@ class PropKeys:
 # labels, occupations, symmetries and intermediates; never redistributed
 class InfoKeys:
     atoms = "Atom"
+    atom_pairs = "Atom (pair)"
     orbitals = "Orbital"
     bonds = "Bond"
     mo_occ = "Occup."
     orbsym = "Symm."
-    atom_tot = "Total (atom)"
-    atom_ref = "E_atom (iso.)"
+    atom_ref = "E_atom_0"
+    sum_row = "Sum"
 
 
 # all component keys; add new keys to PropKeys or InfoKeys, not here
@@ -113,8 +114,8 @@ class DecompCls:
         writename: str = "",
         verbose: int = 0,
         unit: str = "au",
-        bond_crit: str = "none", # "none", "mbo" or "lewis"
-        mbo_thresh: Optional[float] = None,
+        bond_crit: str = "mbo", # "mbo", "lewis" or "none"
+        mbo_thresh: float = 0.8,
         smiles: Optional[str] = None,
         lewis_image: str = "lewis_structure.png",
         trust_atom_order: bool = False
@@ -233,9 +234,9 @@ def sanity_check(
                 'invalid population scheme for part="bonds". valid choices: "mulliken" or '
                 '"iao" (Mayer bond orders are only implemented for these schemes)'
             )
-        if decomp.bond_crit not in ("none", "mbo", "lewis"):
+        if decomp.bond_crit not in ("mbo", "lewis", "none"):
             raise ValueError(
-                'invalid bond criterion. valid choices: "none" (default), "mbo" or "lewis"'
+                'invalid bond criterion. valid choices: "mbo" (default), "lewis" or "none"'
             )
         if decomp.bond_crit == "lewis":
             try:
@@ -244,7 +245,7 @@ def sanity_check(
                 raise ImportError('bond criterion "lewis" requires RDKit') from err
         if decomp.bond_crit == "mbo" and (decomp.mbo_thresh is None or decomp.mbo_thresh <= 0):
             raise ValueError(
-                'bond-order-based bond criterion requires a bond order threshold > 0'
+                'bond-order-based bond criterion requires a bond order threshold > 0. default value: 0.8'
             )
         if decomp.bond_crit == "lewis" and decomp.trust_atom_order and decomp.smiles is None:
             raise ValueError(

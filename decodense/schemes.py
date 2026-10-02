@@ -107,17 +107,20 @@ def _atom_ref(mol, mf):
 
 def _add_intermediates(decomp, atom_res, atom_ref):
     """
-    This function stores the atom-wise intermediates of the bond-wise decomposition
-    in decomp.res_inter (printed as a separate results object)
+    This function stores the intermediates of the bond-wise decomposition
+    (atom-wise for a2b, atom-and-atom-pair-wise for aap2b) in decomp.res_inter
+    (printed as a separate results object)
     """
+    e_tot = atom_res[CompKeys.tot]
+    # isolated-atom energies only exist for atoms: zeros for the atom pairs (aap2b)
+    atom_ref = np.concatenate((atom_ref, np.zeros(e_tot.size - atom_ref.size)))
     decomp.res_inter = {
-        CompKeys.atom_tot: atom_res[CompKeys.tot],
+        CompKeys.tot: e_tot,
         CompKeys.atom_ref: atom_ref,
     }
 
 
 # end _add_intermediates
-
 
 def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     """
@@ -151,6 +154,7 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.ndo,
+        decomp.verbose,
         decomp.bond_crit,
         decomp.mbo_thresh,
         decomp.smiles,
@@ -162,11 +166,11 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     atom_ref = _atom_ref(mol, mf)
 
     # 4. Perform the bond-wise decomposition
-    bond_res, atom_res_mod = a2ap_redistribute(
+    bond_res = a2ap_redistribute(
         atom_res, bond_weights, is_bond, atom_ref, aap=False
     )
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
-        _add_intermediates(decomp, atom_res_mod, atom_ref)
+        _add_intermediates(decomp, atom_res, atom_ref)
     return bond_res
 
 
@@ -227,6 +231,7 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.ndo,
+        decomp.verbose,
         decomp.bond_crit,
         decomp.mbo_thresh,
         decomp.smiles,
@@ -238,11 +243,11 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     atom_ref = _atom_ref(mol, mf)
 
     # 5. Perform the bond-wise decomposition
-    bond_res, atom_res = a2ap_redistribute(
+    bond_res = a2ap_redistribute(
         aap_res, aap2b_weights, is_bond, atom_ref, aap=True
     )
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
-        _add_intermediates(decomp, atom_res, atom_ref)
+        _add_intermediates(decomp, aap_res, atom_ref)
     return bond_res
 
 

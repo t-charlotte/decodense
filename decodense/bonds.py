@@ -18,10 +18,13 @@ from pyscf.data import radii
 
 from pyscf import tools as pyscf_tools
 
-from .tools import make_rdm1, contract, dim, make_mbo, logger
+from .tools import make_rdm1, contract, dim, make_mbo, logger, unique_filename
 from .bond_criteria import get_bond_mask
 
 from typing import Union, Optional
+
+# minimal verbosity for returning the (normalized) bond orders
+VERBOSE_MBO = 2
 
 def bond_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
@@ -31,6 +34,7 @@ def bond_mbo(
     minao: str,
     pop_method: str,
     ndo: bool,
+    verbose: int,
     # input variables below: default value is controlled
     # by __init__ in decomp.py
     bond_crit: str,
@@ -91,6 +95,8 @@ def bond_mbo(
     npairs = int(natm * (natm - 1) / 2)  # number of atom pairs
     ao_labels = pmol.ao_labels(fmt=None)
     n_ao = len(ao_labels)                # Number of AOs
+    
+    a1_idx, a2_idx = np.triu_indices(natm, k=1)
 
     # AO -> atom indicator matrix, used by the (disabled by default) Mulliken check below
     ao_atom_idx = np.array([lbl[0] for lbl in ao_labels])
@@ -125,15 +131,14 @@ def bond_mbo(
         """
 
         # upper-triangle atom-pair indices
-        a_idx, b_idx = np.triu_indices(natm, k=1)
 
-        pair_vals = mbo[a_idx, b_idx]
-        mbo_sorted = np.where(np.abs(pair_vals) > 1e-29, pair_vals, 0.0)
+        ap_mbo = mbo[a_idx, ap_idx]
+        ap_mbo_scr = np.where(np.abs(ap_mbo) > 1e-29, ap_mbo, 0.0)
 
         mbo_AtoAP = np.zeros([natm, npairs], dtype=np.float64)
         ap_idx = np.arange(npairs)
-        mbo_AtoAP[a_idx, ap_idx] = mbo_sorted
-        mbo_AtoAP[b_idx, ap_idx] = mbo_sorted
+        mbo_AtoAP[a1_idx, ap_idx] = ap_mbo_scr
+        mbo_AtoAP[a2_idx, ap_idx] = ap_mbo_scr
 
         # bond criterion: weights of atom pairs that are not bonds are set to zero
         is_bond = get_bond_mask(
@@ -213,6 +218,48 @@ def bond_mbo(
         )
     mbo_AtoAP, is_bond = _mbo_atom_to_ap(mbo)
 
+    # verbose print
+    if verbose >= VERBOSE_MBO:
+        a_labels = [f"{pmol.atom_pure_symbol(k)}{k}" for k in range(pmol.natm)]
+        ap_labels = [
+            f"{mol.atom_symbol(a1)}{a1}-{mol.atom_symbol(a2)}{a2}{'*' if bond else ''}"
+            for a1, a2, bond in zip(a1_idx, a2_idx, is_bond)
+        ]
+        ap_mbo = mbo[a_idx, ap_idx]
+
+        # Mayer bond orders
+        logger.info("\n *** Mayer bond orders ***")
+        logger.info("   Atom pairs marked with \"*\"")
+        logger.info("      are considered bonds")
+        for k in range(npairs):
+            logger.info(f"  {ap_labels[k]:>10s}   {ap_mbo[k]:10.5f}") # this should print the mbo for atom pair k
+
+        # full matrix of normalized bond orders to file
+        filename = unique_filename(f"mayer_bond_order_{pop_method}")
+        try:
+            with open(filename, "w") as f:
+                f.write(
+                    "# normalized bond orders - atom-to-bond weights \n"
+                    + "# atom pairs marked with * are considered bonds\n"
+                )
+                f.write(
+                    f"# {'atom':>4s} "
+                    + " ".join(f"{l:>10s}" for l in ap_labels)
+                    + "\n"
+                )
+                for a1 in range(natm):
+                    f.write(
+                        f"  {atom_labels[a]:>4s} "
+                        + " ".join(f"{a2:10.5f}" for a2 in mbo_AtoAP[a1])
+                        + "\n"
+                    )
+            logger.info(f"\n full atom-to-bond weight matrix written to {filename}\n")
+        except OSError as err:
+            # a failed write of this diagnostic file should not abort the decomposition
+            logger.info(
+                f"\n WARNING: could not write atom-to-bond weight matrix to {filename} "
+                f"({type(err).__name__}: {err})\n"
+            )
     return mbo_AtoAP, is_bond
 # end def bond_mbo()
 

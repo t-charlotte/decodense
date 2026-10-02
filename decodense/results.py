@@ -40,18 +40,22 @@ class ResultsCls:
         self.part = decomp.part if part is None else part
         for key, value in self.res_dict.items():
             setattr(self, comp_key_dict[key], value)
-        # atom-wise intermediates of bond-wise decompositions (separate results object)
+        # intermediates of bond-wise decompositions (separate results object):
+        # atom-wise (a2b) or atom-and-atom-pair-wise (aap2b)
         self.intermediates: Optional[ResultsCls] = None
         if res is None and self.part == "bonds" and decomp.res_inter:
-            self.intermediates = ResultsCls(mol, decomp, res=decomp.res_inter, part="atoms")
+            part_inter = "aap" if decomp.part_method == "aap2b" else "atoms"
+            self.intermediates = ResultsCls(mol, decomp, res=decomp.res_inter, part=part_inter)
 
     def __str__(self):
         """
         build a string from a pandas dataframe built from the results
+        (with an extra last row containing the column sums)
         """
-        string = str(self.to_dataframe())
+        string = str(_with_sum(self.to_dataframe()))
         if self.intermediates is not None:
-            string += "\n\nintermediates (atom-wise):\n" + str(self.intermediates)
+            kind = "atom-and-atom-pair-wise" if self.intermediates.part == "aap" else "atom-wise"
+            string += f"\n\nintermediates ({kind}):\n" + str(self.intermediates)
         return string
 
     def to_dataframe(self) -> pd.DataFrame:
@@ -59,6 +63,16 @@ class ResultsCls:
         build a pandas dataframe from the results
         """
         return fmt(self.mol, self.res_dict, self.print_unit, self.ndo, self.part)
+
+
+def _with_sum(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    this function returns a copy of the dataframe with an extra last row,
+    containing the sums of all numeric columns (non-numeric columns are left empty)
+    """
+    df_sum = df.copy()
+    df_sum.loc[CompKeys.sum_row] = df.select_dtypes(include="number").sum()
+    return df_sum
 
 
 def info(decomp: DecompCls, mol: Optional[gto.Mole] = None, **kwargs: float) -> str:
@@ -119,6 +133,10 @@ def fmt(
         return orbs(mol, res, unit, ndo)
     elif part == "bonds":
         return bonds(mol, res, unit)
+    elif part == "aap":
+        return atoms(mol, res, unit, labels=_aap_labels(mol)).rename_axis(
+            CompKeys.atom_pairs
+        )
     else:
         raise ValueError(f"Invalid partitioning in results.py: {part!r}")
 
@@ -142,7 +160,22 @@ def _unit_scaling(scalar_prop: bool, unit: str) -> float:
     return scaling
 
 
-def atoms(mol: gto.Mole, res: dict[str, Any], unit: str) -> pd.DataFrame:
+def _aap_labels(mol: gto.Mole) -> list[str]:
+    """
+    this function returns the row labels of atom-and-atom-pair-wise results:
+    the atoms (e.g. "C0"), followed by the atom pairs in upper-triangle order (e.g. "C0-O1")
+    """
+    labels = [f"{mol.atom_symbol(i)}{i}" for i in range(mol.natm)]
+    labels += [
+        f"{mol.atom_symbol(a)}{a}-{mol.atom_symbol(b)}{b}"
+        for a, b in zip(*np.triu_indices(mol.natm, k=1))
+    ]
+    return labels
+
+
+def atoms(
+    mol: gto.Mole, res: dict[str, Any], unit: str, labels: Optional[list[str]] = None
+) -> pd.DataFrame:
     """
     atom-based partitioning
     """
@@ -161,8 +194,10 @@ def atoms(mol: gto.Mole, res: dict[str, Any], unit: str) -> pd.DataFrame:
             for comp_key in res.keys()
             for ax_idx, axis in enumerate((" (x)", " (y)", " (z)"))
         }
-    # atom symbols
-    prop[CompKeys.atoms] = [f"{mol.atom_symbol(i)}{i}" for i in range(mol.natm)]
+    # atom symbols (or the given row labels)
+    if labels is None:
+        labels = [f"{mol.atom_symbol(i)}{i}" for i in range(mol.natm)]
+    prop[CompKeys.atoms] = labels
 
     # return as dataframe
     return pd.DataFrame.from_dict(prop).set_index(CompKeys.atoms)
