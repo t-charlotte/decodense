@@ -17,6 +17,7 @@ from .tools import dim, contract, logger, unique_filename
 # minimal verbosity for returning the (partial) atomic populations
 VERBOSE_POP = 2
 
+
 def assign_rdm1s(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.hf.RHF, pbc_dft.rks.RKS],

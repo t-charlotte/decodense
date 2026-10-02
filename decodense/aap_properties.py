@@ -25,6 +25,7 @@ BLKSIZE = 200
 # max. number of atom-RDM1s per batched get_jk call (lower it to save memory)
 JK_BLKSIZE = 16
 
+
 def a2ap_redistribute(
     res: dict[str, np.ndarray],
     a2ap_weights: np.ndarray,
@@ -91,6 +92,8 @@ def a2ap_redistribute(
     bond_res[CompKeys.bonds] = np.column_stack((iu0[is_bond], iu1[is_bond]))
 
     return bond_res
+
+
 # end def a2ap_redistribute()
 
 
@@ -138,7 +141,7 @@ def aap_prop_tot(
         rdm1 = np.array([rdm1, rdm1]) * 0.5
 
     # mol object projected into minao basis
-    if pop_method in ["iao","iaombo"]:
+    if pop_method in ["iao", "iaombo"]:
         pmol = lo.iao.reference_mol(mol, minao=minao)
     else:
         pmol = mol
@@ -189,7 +192,10 @@ def aap_prop_tot(
                 nlc_pars,
             )[0]
             e_xc_nlc_orb = _orb_energies(
-                ao_value_nlc[0], mf.nlcgrids.weights * eps_xc_nlc, mo_coeff, (alpha, beta)
+                ao_value_nlc[0],
+                mf.nlcgrids.weights * eps_xc_nlc,
+                mo_coeff,
+                (alpha, beta),
             )
             del ao_value_nlc
     # end if dft_calc
@@ -258,7 +264,8 @@ def aap_prop_tot(
             + prop.pop(CompKeys.xc_nlc)
         )[:natm]
         fracs = np.divide(
-            e_xc_atom, at_contribs,
+            e_xc_atom,
+            at_contribs,
             out=np.zeros(natm, dtype=np.float64),
             where=np.abs(at_contribs) > 1.0e-14,
         )
@@ -271,10 +278,14 @@ def aap_prop_tot(
         prop[CompKeys.el] = sum(prop.values())
     # end if dft_calc
 
-    prop[CompKeys.struct] = np.concatenate((np.zeros(natm, dtype=np.float64), prop_nuc_rep))
+    prop[CompKeys.struct] = np.concatenate(
+        (np.zeros(natm, dtype=np.float64), prop_nuc_rep)
+    )
     prop[CompKeys.tot] = prop[CompKeys.el] + prop[CompKeys.struct]
 
     return {**prop}
+
+
 # end aap_prop_tot
 
 
@@ -289,7 +300,8 @@ def _e_nuc_ap(mol: gto.Mole) -> np.ndarray:
     dist[np.diag_indices_from(dist)] = 1e200
     enuc = contract("i,ij,j->ij", charges, 1.0 / dist, charges)
 
-    return enuc[np.triu_indices(mol.natm,k=1)]
+    return enuc[np.triu_indices(mol.natm, k=1)]
+
 
 def _atom_rdm1(
     mo_coeff: tuple[np.ndarray, np.ndarray],
@@ -319,7 +331,10 @@ def _atom_rdm1(
         F.append(f)
     # end for
     return rdm1_atom, F
+
+
 # end def _atom_rdm1
+
 
 def _e_jk_atoms(
     mol: gto.Mole,
@@ -339,15 +354,17 @@ def _e_jk_atoms(
     exch = np.zeros((natm, natm), dtype=np.float64)
     for a0, a1 in lib.prange(0, natm, blksize):
         n = a1 - a0
-        if restrict: # alpha and beta 1-RDMs are identical -> one J/K build per atom
+        if restrict:  # alpha and beta 1-RDMs are identical -> one J/K build per atom
 
             vj, vk = mf.get_jk(
                 mol=mol, dm=rdm1_atom[0, a0:a1], with_j=True, with_k=True
             )
             vj, vk = vj.reshape(n, -1), vk.reshape(n, -1)
-            
-            coul[a0:a1] = vj @ rdm1_atom_tot.T # 1/2 tr(2 vj, D_tot)
-            exch[a0:a1] = -vk @ rdm1_atom[0].reshape(natm, -1).T # -1/2 * 2 spins * tr(vk, D_alpha)
+
+            coul[a0:a1] = vj @ rdm1_atom_tot.T  # 1/2 tr(2 vj, D_tot)
+            exch[a0:a1] = (
+                -vk @ rdm1_atom[0].reshape(natm, -1).T
+            )  # -1/2 * 2 spins * tr(vk, D_alpha)
 
         else:
 
@@ -367,7 +384,10 @@ def _e_jk_atoms(
         # end if
     # end for
     return coul, exch
+
+
 # end def _e_jk_atoms
+
 
 def _orb_energies(
     ao0: np.ndarray,
@@ -383,6 +403,7 @@ def _orb_energies(
         weps @ (ao0 @ mo_coeff[i][:, spin_mo]) ** 2
         for i, spin_mo in enumerate(spin_mos)
     ]
+
 
 def _xc_orb_energies(
     mol: gto.Mole,
@@ -413,7 +434,6 @@ def _xc_orb_energies(
         for i, e in enumerate(_orb_energies(ao0, weight * eps_xc, mo_coeff, spin_mos)):
             e_orb[i] += e
     return e_orb
-
 
 
 def _h_core(
@@ -456,7 +476,11 @@ def _get_nuc(mol: gto.Mole) -> np.ndarray:
     return sub_nuc
 
 
-def _xc_ao_deriv(xc_func: str) -> tuple[str, int]: #TODO: fix UnboundLocalError for xc="HF" or any unknown functional type
+def _xc_ao_deriv(
+    xc_func: str,
+) -> tuple[
+    str, int
+]:  # TODO: fix UnboundLocalError for xc="HF" or any unknown functional type
     """
     this function returns the type of xc functional and the level of ao derivatives
     needed

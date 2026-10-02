@@ -114,11 +114,11 @@ class DecompCls:
         writename: str = "",
         verbose: int = 0,
         unit: str = "au",
-        bond_crit: str = "mbo", # "mbo", "lewis" or "none"
+        bond_crit: str = "mbo",  # "mbo", "lewis" or "none"
         mbo_thresh: float = 0.8,
         smiles: Optional[str] = None,
         lewis_image: str = "lewis_structure.png",
-        trust_atom_order: bool = False
+        trust_atom_order: bool = False,
     ) -> None:
         """
         init molecule attributes
@@ -243,14 +243,18 @@ def sanity_check(
                 import rdkit  # noqa: F401
             except ImportError as err:
                 raise ImportError('bond criterion "lewis" requires RDKit') from err
-        if decomp.bond_crit == "mbo" and (decomp.mbo_thresh is None or decomp.mbo_thresh <= 0):
+        if decomp.bond_crit == "mbo" and (
+            decomp.mbo_thresh is None or decomp.mbo_thresh <= 0
+        ):
             raise ValueError(
-                'bond-order-based bond criterion requires a bond order threshold > 0. default value: 0.8'
+                "bond-order-based bond criterion requires a bond order threshold > 0. default value: 0.8"
             )
-        if decomp.bond_crit == "lewis" and decomp.trust_atom_order and decomp.smiles is None:
-            raise ValueError(
-                'trust_atom_order requires a SMILES string'
-            )
+        if (
+            decomp.bond_crit == "lewis"
+            and decomp.trust_atom_order
+            and decomp.smiles is None
+        ):
+            raise ValueError("trust_atom_order requires a SMILES string")
     else:
         raise ValueError(
             'invalid partitioning. valid choices: "atoms" (default), "orbitals" or "bonds"'

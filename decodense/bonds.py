@@ -26,6 +26,7 @@ from typing import Union, Optional
 # minimal verbosity for returning the (normalized) bond orders
 VERBOSE_MBO = 2
 
+
 def bond_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.hf.RHF, pbc_dft.rks.RKS],
@@ -57,15 +58,15 @@ def bond_mbo(
         )
     else:
         rhf = False
-    
+
     if isinstance(mol, pbc_gto.Cell):
         s = mol.pbc_intor("int1e_ovlp_sph")
     else:
         s = mol.intor_symmetric("int1e_ovlp")
 
-    alpha, beta = dim(mo_occ)            # number of electrons
+    alpha, beta = dim(mo_occ)  # number of electrons
 
-    if pop_method in ["iao","iaombo"]:
+    if pop_method in ["iao", "iaombo"]:
         # ndo assertion
         if ndo:
             raise NotImplementedError(
@@ -79,23 +80,25 @@ def bond_mbo(
             iao_spin = lo.iao.iao(mol, mo_coeff[i][:, spin_mo], minao=minao)
             iao.append(lo.vec_lowdin(iao_spin, s))
         # overlap matrix
-        ovlp = np.eye(pmol.nao_nr()) # IAOs are orthonormal
+        ovlp = np.eye(pmol.nao_nr())  # IAOs are orthonormal
 
-    elif pop_method in ["mulliken","mullikenmbo"]:
+    elif pop_method in ["mulliken", "mullikenmbo"]:
         pmol = mol
-        ovlp = s # overlap matrix as calculated before
+        ovlp = s  # overlap matrix as calculated before
 
     else:
-        assert False, "Requested population method for Mayer Bond Orders NYI. Valid options: \"mulliken\" and \"iao\"."
+        assert (
+            False
+        ), 'Requested population method for Mayer Bond Orders NYI. Valid options: "mulliken" and "iao".'
 
     # end if pop_method
 
     # some useful quantities
-    natm = pmol.natm                     # number of atoms
+    natm = pmol.natm  # number of atoms
     npairs = int(natm * (natm - 1) / 2)  # number of atom pairs
     ao_labels = pmol.ao_labels(fmt=None)
-    n_ao = len(ao_labels)                # Number of AOs
-    
+    n_ao = len(ao_labels)  # Number of AOs
+
     a1_idx, a2_idx = np.triu_indices(natm, k=1)
 
     # AO -> atom indicator matrix, used by the (disabled by default) Mulliken check below
@@ -104,26 +107,24 @@ def bond_mbo(
     atom_of_ao[np.arange(n_ao), ao_atom_idx] = 1.0
 
     # generate the 1e RDM
-    if pop_method in ["mulliken","mullikenmbo"]:
+    if pop_method in ["mulliken", "mullikenmbo"]:
         mo_a = mo_coeff[0][:, alpha]
-    else: # iao
+    else:  # iao
         mo_a = contract("ki,kl,lj->ij", iao[0], s, mo_coeff[0][:, alpha])
     mocc_a = mo_occ[0][alpha]
     rdm1_a = make_rdm1(mo_a, mocc_a)
 
-    if rhf: # beta is identical to alpha
+    if rhf:  # beta is identical to alpha
         rdm1_b = rdm1_a
-    else: # UHF or ROHF: compute beta
-        if pop_method in ["mulliken","mullikenmbo"]:
+    else:  # UHF or ROHF: compute beta
+        if pop_method in ["mulliken", "mullikenmbo"]:
             mo_b = mo_coeff[1][:, beta]
-        else: # iao
+        else:  # iao
             mo_b = contract("ki,kl,lj->ij", iao[0], s, mo_coeff[1][:, beta])
         mocc_b = mo_occ[1][beta]
         rdm1_b = make_rdm1(mo_b, mocc_b)
 
-    def _mbo_atom_to_ap(
-        mbo: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _mbo_atom_to_ap(mbo: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
             and a boolean array (ordered according to ap_label) that is True for bonds.
@@ -160,6 +161,7 @@ def bond_mbo(
         mbo_AtoAP[row_nonzero] /= row_sums[row_nonzero, None]
 
         return mbo_AtoAP, is_bond
+
     # end def _mbo_atom_to_bond()
 
     def _get_mulpop(
@@ -189,19 +191,25 @@ def bond_mbo(
 
         mbo = make_mbo(rdm1_mbo, ovlp, natm, ao_labels)
 
-        do_check = False # set manually for now
+        do_check = False  # set manually for now
         if do_check:
-            # NOTE: bond orders for same atom A sum up to twice the Mulliken population of A            
-            mulpop = _get_mulpop(rdm1_mbo,ovlp) # get the mulliken population
-            mulpop_check = np.sum(mbo,axis=0) * 0.5 # should be the same as mulpop
-            assert np.allclose(mulpop, mulpop_check), "Deviations found in Mulliken atomic populations!"
-            
+            # NOTE: bond orders for same atom A sum up to twice the Mulliken population of A
+            mulpop = _get_mulpop(rdm1_mbo, ovlp)  # get the mulliken population
+            mulpop_check = np.sum(mbo, axis=0) * 0.5  # should be the same as mulpop
+            assert np.allclose(
+                mulpop, mulpop_check
+            ), "Deviations found in Mulliken atomic populations!"
+
             # alternative definition: subtract all bond orders except same atom from nuclear charges
             charges = mol.atom_charges()
             for a in range(natm):
-                mbo[a][a] += charges[a] - 2*mulpop_check[a] # corresponds to charges[a] - ( sum mbo[a][b] over b )
-            mulpop_check = np.sum(mbo,axis=0)
-            assert np.allclose(charges, mulpop_check), "Deviations found in nuclear charges!"
+                mbo[a][a] += (
+                    charges[a] - 2 * mulpop_check[a]
+                )  # corresponds to charges[a] - ( sum mbo[a][b] over b )
+            mulpop_check = np.sum(mbo, axis=0)
+            assert np.allclose(
+                charges, mulpop_check
+            ), "Deviations found in nuclear charges!"
         # end do_check
 
         # subtract mulliken population to get number of nonbonding electrons
@@ -210,12 +218,13 @@ def bond_mbo(
         #     mbo[a][a] -= mulpop[a] # this should also equal mulpop - sum of Bab where b is not a
 
         return mbo
+
     # end _get_mbo()
 
     mbo = _get_mbo(
-        rdm1_a, # alpha RDM1
-        rdm1_b, # beta RDM1
-        )
+        rdm1_a,  # alpha RDM1
+        rdm1_b,  # beta RDM1
+    )
     mbo_AtoAP, is_bond = _mbo_atom_to_ap(mbo)
 
     # verbose print
@@ -229,10 +238,12 @@ def bond_mbo(
 
         # Mayer bond orders
         logger.info("\n *** Mayer bond orders ***")
-        logger.info("   Atom pairs marked with \"*\"")
+        logger.info('   Atom pairs marked with "*"')
         logger.info("      are considered bonds")
         for k in range(npairs):
-            logger.info(f"  {ap_labels[k]:>10s}   {ap_mbo[k]:10.5f}") # this should print the mbo for atom pair k
+            logger.info(
+                f"  {ap_labels[k]:>10s}   {ap_mbo[k]:10.5f}"
+            )  # this should print the mbo for atom pair k
 
         # full matrix of normalized bond orders to file
         filename = unique_filename(f"mayer_bond_order_{pop_method}")
@@ -243,9 +254,7 @@ def bond_mbo(
                     + "# atom pairs marked with * are considered bonds\n"
                 )
                 f.write(
-                    f"# {'atom':>4s} "
-                    + " ".join(f"{l:>10s}" for l in ap_labels)
-                    + "\n"
+                    f"# {'atom':>4s} " + " ".join(f"{l:>10s}" for l in ap_labels) + "\n"
                 )
                 for a1 in range(natm):
                     f.write(
@@ -261,7 +270,10 @@ def bond_mbo(
                 f"({type(err).__name__}: {err})\n"
             )
     return mbo_AtoAP, is_bond
+
+
 # end def bond_mbo()
+
 
 def orb_mbo(
     mol: Union[gto.Mole, pbc_gto.Cell],
@@ -293,17 +305,19 @@ def orb_mbo(
     n_spin = max(alpha.size, beta.size)
 
     # mol object projected into minao basis
-    if pop_method in ["iao","iaombo"]:
+    if pop_method in ["iao", "iaombo"]:
         # ndo assertion
         if ndo:
             raise NotImplementedError(
                 "IAO-based populations for NDOs is not implemented"
             )
         pmol = lo.iao.reference_mol(mol, minao=minao)
-    elif pop_method in ["mulliken","mullikenmbo"]:
+    elif pop_method in ["mulliken", "mullikenmbo"]:
         pmol = mol
     else:
-        assert False, "Requested population method for Mayer Bond Orders NYI. Valid options: \"mulliken\" and \"iao\"."
+        assert (
+            False
+        ), 'Requested population method for Mayer Bond Orders NYI. Valid options: "mulliken" and "iao".'
 
     # Number of atoms
     natm = pmol.natm
@@ -325,11 +339,10 @@ def orb_mbo(
     a_idx, b_idx = np.triu_indices(natm, k=1)
 
     # Overlap matrix
-    if pop_method in ["mulliken","mullikenmbo"]:
+    if pop_method in ["mulliken", "mullikenmbo"]:
         ovlp = s
-    else: # iao
+    else:  # iao
         ovlp = np.eye(pmol.nao_nr())
-
 
     def _get_mbo(
         mocc_k: float,
@@ -357,8 +370,10 @@ def orb_mbo(
 
             # NOTE: bond orders for same atom A sum up to the Mulliken population of A
             mbo_check = mocc_k**2 * np.outer(atom_w_k, atom_w_k)
-            mulpop_check = np.sum(mbo_check,axis=0) # should be the same as mulpop
-            assert np.allclose(mulpop, mulpop_check), "Deviations found in Mulliken atomic populations!"
+            mulpop_check = np.sum(mbo_check, axis=0)  # should be the same as mulpop
+            assert np.allclose(
+                mulpop, mulpop_check
+            ), "Deviations found in Mulliken atomic populations!"
 
         # sort bond orders:
         # first all non-bonding populations (len: natm)
@@ -375,11 +390,11 @@ def orb_mbo(
         # normalization
         # note that the sum should equal 1 already,
         # meaning that normalization should not have any effect
-        mbo_sorted = mbo_sorted/np.sum(mbo_sorted)
+        mbo_sorted = mbo_sorted / np.sum(mbo_sorted)
 
         return mbo, mbo_sorted
-    # end def _get_mbo()
 
+    # end def _get_mbo()
 
     # loop over spin, calculate the orb rdm1s and get their mbos
 
@@ -390,7 +405,7 @@ def orb_mbo(
     rdm1_spin_alpha = None
     mbo_spin_alpha = None
     mbo_spin_sorted_alpha = None
-    for i, spin_mo in enumerate((alpha,beta)):
+    for i, spin_mo in enumerate((alpha, beta)):
 
         if i == 1 and rhf:
             rdm1 += rdm1_spin_alpha
@@ -399,9 +414,9 @@ def orb_mbo(
             continue
 
         # Get mo_coefficients and occupation
-        if pop_method in ["mulliken","mullikenmbo"]:
+        if pop_method in ["mulliken", "mullikenmbo"]:
             mo = mo_coeff[i][:, spin_mo]
-        else: # iao
+        else:  # iao
             iao = lo.iao.iao(mol, mo_coeff[i][:, spin_mo], minao=minao)
             iao = lo.vec_lowdin(iao, s)
             mo = contract("ki,kl,lj->ij", iao, s, mo_coeff[i][:, spin_mo])
@@ -425,7 +440,7 @@ def orb_mbo(
         mbo_spin_sorted = []
         # print("\nSpin " + str(i) + " :: \n")
         for j in range(mo.shape[1]):
-            #print("\n Orbital " + str(j) + " :: \n")
+            # print("\n Orbital " + str(j) + " :: \n")
             mbo_spin_j, mbo_spin_j_sorted = _get_mbo(mocc[j], atom_w[:, j])
             mbo_spin.append(mbo_spin_j)
             mbo_spin_sorted.append(mbo_spin_j_sorted)
@@ -435,7 +450,7 @@ def orb_mbo(
                 pyscf_tools.cubegen.density(
                     pmol,
                     "rdm1_orb_" + str(j) + "_" + str(i) + ".cube",
-                    mocc[j] * np.outer(mo[:, j], mo[:, j])
+                    mocc[j] * np.outer(mo[:, j], mo[:, j]),
                 )
             # end if
         # end loop over MOs
@@ -449,9 +464,7 @@ def orb_mbo(
         mbo_sorted.append(mbo_spin_sorted)
     # end loop over spin
 
-    def _mbo_atom_to_bond(
-        mbo: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _mbo_atom_to_bond(mbo: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Returns an array with normalized MBOs from atom to bond -- dim = (atom_labels,bond_labels)
         """
@@ -473,9 +486,12 @@ def orb_mbo(
         mbo_AtoB[row_nonzero] *= diag[row_nonzero, None]
 
         return mbo_AtoB
+
     # end def _mbo_atom_to_bond()
 
     mbo_full = make_mbo(rdm1, ovlp, natm, ao_labels)
 
     return mbo_sorted, mbo_full
+
+
 # end def orb_mbo()

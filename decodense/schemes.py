@@ -48,7 +48,7 @@ def _scheme_atoms_mo(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.prop,
-        "mo", # decomp.part_method
+        "mo",  # decomp.part_method
         decomp.ndo,
         decomp.gauge_origin,
         weights,
@@ -122,6 +122,7 @@ def _add_intermediates(decomp, atom_res, atom_ref):
 
 # end _add_intermediates
 
+
 def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     """
     This function takes care of bond-wise decompositions
@@ -142,7 +143,7 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     )
     logger.warning(
         'The "a2b" bond-wise decomposition scheme uses '
-        'Eriksen\'s MO-based atom-wise decomposition scheme.'
+        "Eriksen's MO-based atom-wise decomposition scheme."
     )
 
     # 2. Compute bond weights
@@ -159,16 +160,14 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.mbo_thresh,
         decomp.smiles,
         decomp.lewis_image,
-        decomp.trust_atom_order
+        decomp.trust_atom_order,
     )
 
     # 3. Compute isolated-atom energies
     atom_ref = _atom_ref(mol, mf)
 
     # 4. Perform the bond-wise decomposition
-    bond_res = a2ap_redistribute(
-        atom_res, bond_weights, is_bond, atom_ref, aap=False
-    )
+    bond_res = a2ap_redistribute(atom_res, bond_weights, is_bond, atom_ref, aap=False)
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
         _add_intermediates(decomp, atom_res, atom_ref)
     return bond_res
@@ -236,16 +235,14 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.mbo_thresh,
         decomp.smiles,
         decomp.lewis_image,
-        decomp.trust_atom_order
+        decomp.trust_atom_order,
     )
 
     # 4. Compute isolated-atom energies
     atom_ref = _atom_ref(mol, mf)
 
     # 5. Perform the bond-wise decomposition
-    bond_res = a2ap_redistribute(
-        aap_res, aap2b_weights, is_bond, atom_ref, aap=True
-    )
+    bond_res = a2ap_redistribute(aap_res, aap2b_weights, is_bond, atom_ref, aap=True)
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
         _add_intermediates(decomp, aap_res, atom_ref)
     return bond_res

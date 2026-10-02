@@ -250,6 +250,7 @@ def make_natorb(
         occ_no[1][mask_beta],
     )
 
+
 def make_mbo(
     rdm1: np.ndarray,
     ovlp: np.ndarray,
@@ -285,6 +286,7 @@ def make_mbo(
         mbo[:, ao_empty_atom] = 0.0
 
     return mbo
+
 
 def write_rdm1(
     mol: gto.Mole,

@@ -465,6 +465,7 @@ def prop_tot(
             CompKeys.orbsym: orbsym(mol, (mo_coeff[0][:, alpha], mo_coeff[1][:, beta])),
         }
 
+
 def _e_nuc(mol: gto.Mole) -> np.ndarray:
     """
     this function returns the nuclear repulsion energy

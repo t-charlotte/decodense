@@ -15,13 +15,14 @@ from .tools import logger
 
 from typing import Union, Optional, TYPE_CHECKING
 
-if TYPE_CHECKING: # only for type annotations, RDKit remains optional
+if TYPE_CHECKING:  # only for type annotations, RDKit remains optional
     from rdkit import Chem
+
 
 def get_bond_mask(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mbo: Optional[np.ndarray],
-    bond_crit: str = "none",           # "none", "mbo" or "lewis"
+    bond_crit: str = "none",  # "none", "mbo" or "lewis"
     mbo_thresh: float = 0.1,
     smiles: Optional[str] = None,
     lewis_image: str = "lewis_structure.png",
@@ -36,10 +37,10 @@ def get_bond_mask(
     - bond_crit = "none": assume all atom pairs are bonds
     - bond_crit = "mbo": an atom pair is a bond if the bond order is above a certain threshold
     - bond_crit = "lewis": an atom pair is a bond if the Lewis structure shows a bond (see lewis_bond_mask)
-    
+
     """
     if bond_crit == "lewis" and isinstance(mol, pbc_gto.Cell):
-        raise NotImplementedError('Lewis bond criterion is not implemented for PBC')
+        raise NotImplementedError("Lewis bond criterion is not implemented for PBC")
 
     a_idx, b_idx = np.triu_indices(mol.natm, k=1)
 
@@ -51,7 +52,10 @@ def get_bond_mask(
         is_bond = np.ones(a_idx.size, dtype=bool)
 
     return is_bond
+
+
 # end def get_bond_mask()
+
 
 def _pyscf_to_rdkit(mol: gto.Mole) -> "Chem.Mol":
     """
@@ -66,7 +70,10 @@ def _pyscf_to_rdkit(mol: gto.Mole) -> "Chem.Mol":
         for i, (x, y, z) in enumerate(coords)
     )
     return Chem.MolFromXYZBlock(xyz)
+
+
 # end def _pyscf_to_rdkit()
+
 
 def _save_lewis_image(rdkit_mol: "Chem.Mol", fname: str) -> None:
     """
@@ -76,13 +83,16 @@ def _save_lewis_image(rdkit_mol: "Chem.Mol", fname: str) -> None:
     from rdkit.Chem import AllChem
     from rdkit.Chem.Draw import MolToImage
 
-    rd_draw = Chem.Mol(rdkit_mol) # copy, do not overwrite 3D coordinates
-    AllChem.Compute2DCoords(rd_draw) # compute 2D coordinates for making a drawing
+    rd_draw = Chem.Mol(rdkit_mol)  # copy, do not overwrite 3D coordinates
+    AllChem.Compute2DCoords(rd_draw)  # compute 2D coordinates for making a drawing
     for atom in rd_draw.GetAtoms():
         atom.SetProp("atomNote", str(atom.GetIdx()))
     MolToImage(rd_draw, size=(600, 600)).save(fname)
-    logger.info(f"Saved image of Lewis structure to \"{fname}\"")
+    logger.info(f'Saved image of Lewis structure to "{fname}"')
+
+
 # end def _save_lewis_image()
+
 
 def _connectivity(mol_smiles: "Chem.Mol") -> "Chem.RWMol":
     """
@@ -104,7 +114,10 @@ def _connectivity(mol_smiles: "Chem.Mol") -> "Chem.RWMol":
         bond.SetBondType(Chem.BondType.SINGLE)
         bond.SetIsAromatic(False)
     return connectivity
+
+
 # end def _connectivity()
+
 
 def _best_match(
     connect_proposal: "Chem.Mol",
@@ -133,8 +146,10 @@ def _best_match(
     """
     from rdkit import Chem
 
-    Chem.FastFindRings(connect_proposal) # ring information not yet contained in XYZ text
-    
+    Chem.FastFindRings(
+        connect_proposal
+    )  # ring information not yet contained in XYZ text
+
     # find all ways to place the SMILES connectivity onto the connectivity proposal
     # e.g. -CH3 groups have six ways (due to rotation and reflection) etc.
     # every match is a tuple: match[i_smiles] = i_pyscf
@@ -168,10 +183,13 @@ def _best_match(
     # divide bond lengths by the sum of the covalent radii, and sum these ratios
     d = np.linalg.norm(coords[ia] - coords[ib], axis=-1)
     score = np.sum(d / (r_cov[ia] + r_cov[ib]), axis=1)
-    
+
     # return match with lowest score
     return matches[int(np.argmin(score))]
+
+
 # end def _best_match()
+
 
 def lewis_bond_mask(
     mol: gto.Mole,
@@ -194,7 +212,7 @@ def lewis_bond_mask(
          * if trust_atom_order == True: do not map, assume numberings are the same
          * else: try to map based on atom distances,
                  if this fails: try to map based on bond order values
-    
+
     arguments:
     - mol: the pyscf molecule object
     - smiles: SMILES string for the considered molecule
@@ -210,20 +228,20 @@ def lewis_bond_mask(
     from rdkit import Chem
     from rdkit.Chem import rdDetermineBonds
 
-    atoms_pyscf = _pyscf_to_rdkit(mol) # rdkit object of atoms in pyscf order, no bonds
+    atoms_pyscf = _pyscf_to_rdkit(mol)  # rdkit object of atoms in pyscf order, no bonds
 
     if smiles is None:
         # Lewis structure directly from the geometry (xyz2mol)
         logger.warning(
             "Warning: no SMILES string provided. The Lewis structure is determined "
-            "from the geometry. Please inspect \"" + image_file + "\"."
+            'from the geometry. Please inspect "' + image_file + '".'
         )
         mol_lewis = Chem.Mol(atoms_pyscf)
         rdDetermineBonds.DetermineBonds(mol_lewis, charge=int(mol.charge))
     else:
         # generate a Lewis structure from the provided SMILES string
         params = Chem.SmilesParserParams()
-        params.removeHs = False # do not remove hydrogen atoms
+        params.removeHs = False  # do not remove hydrogen atoms
         mol_smiles = Chem.MolFromSmiles(smiles, params)
         if mol_smiles is None:
             raise ValueError(f"invalid SMILES string: {smiles}")
@@ -236,12 +254,12 @@ def lewis_bond_mask(
 
         if trust_atom_order:
             # the user guarantees that pyscf and RDKit atom order are identical
-            logger.warning( 
+            logger.warning(
                 "Warning: trust_atom_order is set. The Lewis structure is taken from "
                 "the SMILES string without checking the atom order. You are fully "
                 "responsible for the pyscf atom order being identical to the RDKit "
                 "atom order (SMILES atoms in order, followed by the implicit "
-                "hydrogens added by RDKit). Please inspect \"" + image_file + "\"."
+                'hydrogens added by RDKit). Please inspect "' + image_file + '".'
             )
             mol_lewis = mol_smiles
         else:
@@ -259,7 +277,9 @@ def lewis_bond_mask(
             connect_proposal = Chem.Mol(atoms_pyscf)
             # and add single bonds ("edges") between those atom pairs
             # whose interatomic distance is below cov_factor * sum of RDKit's covalent radii
-            rdDetermineBonds.DetermineConnectivity(connect_proposal, covFactor=cov_factor)
+            rdDetermineBonds.DetermineConnectivity(
+                connect_proposal, covFactor=cov_factor
+            )
             # map the SMILES atom numbering onto the pyscf atom numbering
             # by finding connect_smiles as a subgraph of connect_proposal
             match = _best_match(connect_proposal, connect_smiles, coords, r_cov)
@@ -303,4 +323,6 @@ def lewis_bond_mask(
     adj = Chem.GetAdjacencyMatrix(mol_lewis).astype(bool)
     a_idx, b_idx = np.triu_indices(mol.natm, k=1)
     return adj[a_idx, b_idx]
+
+
 # end def lewis_bond_mask()

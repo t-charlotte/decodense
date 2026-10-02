@@ -23,8 +23,13 @@ STAB_E_TOL = 1.0e-5
 SCF_ATTRS = ("conv_tol", "conv_tol_grad", "max_cycle", "max_memory")
 DFT_ATTRS = ("xc", "nlc", "small_rho_cutoff")
 GRID_ATTRS = (
-    "level", "atom_grid", "prune", "radi_method",
-    "becke_scheme", "radii_adjust", "atomic_radii",
+    "level",
+    "atom_grid",
+    "prune",
+    "radi_method",
+    "becke_scheme",
+    "radii_adjust",
+    "atomic_radii",
 )
 
 
@@ -47,6 +52,8 @@ def atom_ref_energies(
             cache[label] = _e_atom(mol, mf, i, dft_calc)
         e_ref[i] = cache[label]
     return e_ref
+
+
 # end def atom_ref_energies()
 
 
@@ -61,6 +68,8 @@ def _hund_spin(z: int) -> int:
         n_open = n_el % cap
         n_unpaired += min(n_open, cap - n_open)
     return n_unpaired
+
+
 # end def _hund_spin()
 
 
@@ -71,6 +80,8 @@ def _copy_attrs(dst: Any, src: Any, attrs: tuple[str, ...]) -> None:
     for attr in attrs:
         if hasattr(src, attr):
             setattr(dst, attr, getattr(src, attr))
+
+
 # end def _copy_attrs()
 
 
@@ -140,8 +151,12 @@ def _e_atom(
         )
 
     if not np.isfinite(e_best):
-        logger.warning(f"Warning: isolated-atom calculation for {label} did not converge")
+        logger.warning(
+            f"Warning: isolated-atom calculation for {label} did not converge"
+        )
         return mf_atm.e_tot
 
     return e_best
+
+
 # end def _e_atom()

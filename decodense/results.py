@@ -45,7 +45,9 @@ class ResultsCls:
         self.intermediates: Optional[ResultsCls] = None
         if res is None and self.part == "bonds" and decomp.res_inter:
             part_inter = "aap" if decomp.part_method == "aap2b" else "atoms"
-            self.intermediates = ResultsCls(mol, decomp, res=decomp.res_inter, part=part_inter)
+            self.intermediates = ResultsCls(
+                mol, decomp, res=decomp.res_inter, part=part_inter
+            )
 
     def __str__(self):
         """
@@ -54,7 +56,11 @@ class ResultsCls:
         """
         string = str(_with_sum(self.to_dataframe()))
         if self.intermediates is not None:
-            kind = "atom-and-atom-pair-wise" if self.intermediates.part == "aap" else "atom-wise"
+            kind = (
+                "atom-and-atom-pair-wise"
+                if self.intermediates.part == "aap"
+                else "atom-wise"
+            )
             string += f"\n\nintermediates ({kind}):\n" + str(self.intermediates)
         return string
 
@@ -288,7 +294,8 @@ def bonds(mol: gto.Mole, res: dict[str, Any], unit: str) -> pd.DataFrame:
     }
     # bond labels, e.g. "C0-O1"
     prop[CompKeys.bonds] = [
-        f"{mol.atom_symbol(a)}{a}-{mol.atom_symbol(b)}{b}" for a, b in res[CompKeys.bonds]
+        f"{mol.atom_symbol(a)}{a}-{mol.atom_symbol(b)}{b}"
+        for a, b in res[CompKeys.bonds]
     ]
 
     # return as dataframe
