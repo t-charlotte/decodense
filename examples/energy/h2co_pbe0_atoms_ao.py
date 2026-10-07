@@ -7,12 +7,13 @@ from pyscf.opentrustregion import mf_to_otr
 
 import decodense
 
-# init molecule
+# init molecule (formaldehyde)
 mol = gto.M(
     atom="""
-        O  0.00000000  0.00000000  0.00000000
-        H -0.75390364  0.00000000 -0.58783729
-        H  0.75390364  0.00000000 -0.58783729
+    C     0.00072760  -0.00011425   0.00000109
+    O     1.17836953  -0.18502406   0.00176610
+    H    -0.73339368  -0.82354548  -0.00115967
+    H    -0.44570339   1.00868375  -0.00060753
     """,
     verbose=0,
     output=None,

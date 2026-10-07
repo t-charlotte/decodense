@@ -3,11 +3,12 @@
 
 import numpy as np
 from pyscf import gto, scf
-from pyscf.opentrustregion import mf_to_otr
+from pyscf.opentrustregion import PipekMezeyOTR, mf_to_otr
+from pandas import set_option
 
 import decodense
 
-# init molecule
+# init molecule (water)
 mol = gto.M(
     atom="""
         O  0.00000000  0.00000000  0.00000000
@@ -30,12 +31,23 @@ stable, direction = mf.stability_check()
 # occupied orbitals
 occ_mo = np.where(mf.mo_occ == 2.0)[0]
 
-# mo coefficients
-mo_coeff = 2 * (mf.mo_coeff[:, occ_mo],)
+# pipek-mezey procedure with OTR
+loc = PipekMezeyOTR(mol, mf.mo_coeff[:, occ_mo])
+loc.pop_method = "iao"
+loc.conv_tol = 1e-10
+mo_coeff = loc.kernel()
+
+# verify optimum is a true minimum
+stable, direction = loc.stability_check()
 
 # decomposition
-# default pop_method = "mulliken"
-decomp = decodense.DecompCls(part="atoms", part_method="ao")
+# default bond criterion is "mbo"
+# default MBO threshold is 0.8
+# verbose = 1 prints the intermediates
+decomp = decodense.DecompCls(
+    pop_method="iao", part="bonds", part_method="a2b", verbose=1
+)
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
+set_option("display.max_rows", None, "display.max_columns", None)
 print(res)
