@@ -44,6 +44,7 @@ def prop_tot(
     ndo: bool,
     gauge_origin: np.ndarray,
     weights: Optional[list[np.ndarray]],
+    atom_ref: Optional[np.ndarray] = None,
 ) -> dict[str, Union[np.ndarray, list[np.ndarray]]]:
     """
     this function returns atom-decomposed and orbital-decomposed mean-field properties
@@ -423,6 +424,11 @@ def prop_tot(
         else:
             prop[CompKeys.struct] = prop_nuc_rep
         prop[CompKeys.tot] = prop[CompKeys.el] + prop[CompKeys.struct]
+
+        if atom_ref is not None:
+            prop[CompKeys.atom_ref] = atom_ref
+            prop[CompKeys.tot_rel] = prop[CompKeys.tot] - atom_ref
+
         return {**prop}
     else:  # orbs
         # domain: (spin, mo index in mo_coeff, position within the spin channel)

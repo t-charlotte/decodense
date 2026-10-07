@@ -66,7 +66,7 @@ def bond_mbo(
 
     alpha, beta = dim(mo_occ)  # number of electrons
 
-    if pop_method in ["iao", "iaombo"]:
+    if pop_method == "iao":
         # ndo assertion
         if ndo:
             raise NotImplementedError(
@@ -82,7 +82,7 @@ def bond_mbo(
         # overlap matrix
         ovlp = np.eye(pmol.nao_nr())  # IAOs are orthonormal
 
-    elif pop_method in ["mulliken", "mullikenmbo"]:
+    elif pop_method == "mulliken":
         pmol = mol
         ovlp = s  # overlap matrix as calculated before
 
@@ -133,7 +133,7 @@ def bond_mbo(
 
         # upper-triangle atom-pair indices
 
-        ap_mbo = mbo[a_idx, ap_idx]
+        ap_mbo = mbo[a1_idx, a2_idx]
         ap_mbo_scr = np.where(np.abs(ap_mbo) > 1e-29, ap_mbo, 0.0)
 
         mbo_AtoAP = np.zeros([natm, npairs], dtype=np.float64)
@@ -305,14 +305,14 @@ def orb_mbo(
     n_spin = max(alpha.size, beta.size)
 
     # mol object projected into minao basis
-    if pop_method in ["iao", "iaombo"]:
+    if pop_method == "iao":
         # ndo assertion
         if ndo:
             raise NotImplementedError(
                 "IAO-based populations for NDOs is not implemented"
             )
         pmol = lo.iao.reference_mol(mol, minao=minao)
-    elif pop_method in ["mulliken", "mullikenmbo"]:
+    elif pop_method == "mulliken":
         pmol = mol
     else:
         assert (

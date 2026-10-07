@@ -20,25 +20,51 @@ from .tools import write_rdm1, logger
 VERBOSE_INTERMEDIATES = 1
 
 
-def _scheme_atoms_mo(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
-    """
-    This function takes care of MO-based atom-wise decompositions:
-    1. Compute atomic weights
-    2. Perform the decomposition
-    3. Writes the RDM1s if requested
-    """
-    # 1. Compute atomic weights
-    weights = assign_rdm1s(
+def _scheme_atoms(
         mol,
         mf,
         mo_coeff,
         mo_occ,
-        decomp.minao,
-        decomp.pop_method,
-        decomp.ndo,
-        decomp.verbose,
-    )
-    # 2. Perform the decomposition
+        rdm1,
+        decomp,
+        atom_ref: Optional[np.ndarray] = None,
+    ):
+    """
+    This function takes care of atom-wise decompositions:
+    1. Compute atomic weights (only if part_method == "mo")
+    2. Compute isolated-atom energies
+    3. Perform the decomposition
+    4. Write the RDM1s if requested
+    """
+
+    # in case of bond-wise decomposition (A2B)
+    if decomp.part == "bonds":
+        part = "atoms"
+        part_method = "mo"
+    else:
+        part = decomp.part
+        part_method = decomp.part_method
+
+    # 1. Compute atomic weights
+    if part_method == "mo":
+        weights = assign_rdm1s(
+            mol,
+            mf,
+            mo_coeff,
+            mo_occ,
+            decomp.minao,
+            decomp.pop_method,
+            decomp.ndo,
+            decomp.verbose,
+        )
+    else:
+        weights = None
+
+    # 2. Compute isolated-atom energies
+    if atom_ref is None:
+        atom_ref = _atom_ref(mol, mf)
+
+    # 3. Perform the decomposition
     res = prop_tot(
         mol,
         mf,
@@ -48,15 +74,17 @@ def _scheme_atoms_mo(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.prop,
-        "mo",  # decomp.part_method
+        part_method,
         decomp.ndo,
         decomp.gauge_origin,
         weights,
+        atom_ref,
     )
-    # 3. Writes the RDM1s if requested
+
+    # 4. Write the RDM1s if requested
     if decomp.write != "":
         write_rdm1(
-            mol, decomp.part, mo_coeff, mo_occ, decomp.write, decomp.writename, weights
+            mol, part, mo_coeff, mo_occ, decomp.write, decomp.writename, weights
         )
 
     return res
@@ -65,11 +93,9 @@ def _scheme_atoms_mo(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
 # end _scheme_atoms
 
 
-def _scheme_atoms_ao_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
+def _scheme_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     """
-    This function takes care of AO-based atom-wise decompositions
-    and orbital-wise decompositions.
-    The difference between these two is indicated by decomp.part_method.
+    This function takes care of orbital-wise decompositions.
     """
     return prop_tot(
         mol,
@@ -80,7 +106,7 @@ def _scheme_atoms_ao_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.prop,
-        decomp.part_method,
+        None, # decomp.part_method
         decomp.ndo,
         decomp.gauge_origin,
         weights=None,
@@ -88,7 +114,6 @@ def _scheme_atoms_ao_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
 
 
 # end _scheme_orbitals
-
 
 def _atom_ref(mol, mf):
     """
@@ -127,9 +152,9 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     """
     This function takes care of bond-wise decompositions
     using the atoms-to-bonds scheme:
-    1. Perform an atom-wise decomposition
-    2. Compute bond weights
-    3. Compute isolated-atom energies
+    1. Compute isolated-atom energies
+    2. Perform an atom-wise decomposition
+    3. Compute bond weights
     4. Perform the bond-wise decomposition
     """
 
@@ -137,16 +162,19 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     if decomp.prop != "energy":
         raise NotImplementedError("Bond-wise decomposition of dipoles NYI!")
 
-    # 1. Perform an atom-wise decomposition
-    atom_res = _scheme_atoms_mo(  # NOTE: MO for now -> how to implement choosing AO?
-        mol, mf, mo_coeff, mo_occ, rdm1, decomp
+    # 1. Compute isolated-atom energies
+    atom_ref = _atom_ref(mol, mf)
+
+    # 2. Perform an atom-wise decomposition
+    atom_res = _scheme_atoms(  # NOTE: MO for now -> how to implement choosing AO?
+        mol, mf, mo_coeff, mo_occ, rdm1, decomp, atom_ref
     )
     logger.warning(
         'The "a2b" bond-wise decomposition scheme uses '
         "Eriksen's MO-based atom-wise decomposition scheme."
     )
 
-    # 2. Compute bond weights
+    # 3. Compute bond weights
     bond_weights, is_bond = bond_mbo(
         mol,
         mf,
@@ -162,9 +190,6 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.lewis_image,
         decomp.trust_atom_order,
     )
-
-    # 3. Compute isolated-atom energies
-    atom_ref = _atom_ref(mol, mf)
 
     # 4. Perform the bond-wise decomposition
     bond_res = a2ap_redistribute(atom_res, bond_weights, is_bond, atom_ref, aap=False)
@@ -251,9 +276,9 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
 # end _scheme_bonds_aap2b
 
 SCHEMES = {
-    ("atoms", "mo"): _scheme_atoms_mo,
-    ("atoms", "ao"): _scheme_atoms_ao_orbitals,
-    ("orbitals", None): _scheme_atoms_ao_orbitals,
+    ("atoms", "mo"): _scheme_atoms,
+    ("atoms", "ao"): _scheme_atoms,
+    ("orbitals", None): _scheme_orbitals,
     ("bonds", "a2b"): _scheme_bonds_a2b,
     ("bonds", "aap2b"): _scheme_bonds_aap2b,
 }

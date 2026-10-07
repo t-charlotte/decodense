@@ -141,7 +141,7 @@ def aap_prop_tot(
         rdm1 = np.array([rdm1, rdm1]) * 0.5
 
     # mol object projected into minao basis
-    if pop_method in ["iao", "iaombo"]:
+    if pop_method == "iao":
         pmol = lo.iao.reference_mol(mol, minao=minao)
     else:
         pmol = mol
