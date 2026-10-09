@@ -57,11 +57,11 @@ class ResultsCls:
         string = str(_with_sum(self.to_dataframe()))
         if self.intermediates is not None:
             kind = (
-                "atom-and-atom-pair-wise"
+                "atom and atom pair wise"
                 if self.intermediates.part == "aap"
                 else "atom-wise"
             )
-            string += f"\n\nintermediates ({kind}):\n" + str(self.intermediates)
+            string += f"\n\nIntermediates ({kind}):\n" + str(self.intermediates)
         return string
 
     def to_dataframe(self) -> pd.DataFrame:

@@ -12,11 +12,18 @@ import decodense
 TOL = 9
 
 # settings
+# atom- or orbital-wise schemes
 POP_METHOD = ("mulliken", "lowdin", "meta_lowdin", "becke", "iao")
 PART = (
     ("orbitals", None),  # orbital-wise scheme
     ("atoms", "ao"),  # Nakai's AO-based atom-wise scheme (EDA)
     ("atoms", "mo"),  # Eriksen's MO-based atom-wise scheme
+)
+# bond-wise schemes
+POP_METHOD_BOND = ("mulliken", "iao")
+PART_BOND = (
+    ("bonds", "a2b"),  # atoms-to-bonds
+    ("bonds", "aap2b"),  # atoms-and-atom-pairs-to-bonds
 )
 
 # geometry directory
@@ -55,21 +62,30 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     def test(self):
         mf_e_tot = mf.e_tot
-        for pop_method in POP_METHOD:
-            for part_pair in PART:
-                with self.subTest(pop_method=pop_method, part_pair=part_pair):
-                    part, part_method = part_pair
-                    decomp = decodense.DecompCls(
-                        pop_method=pop_method, part=part, part_method=part_method
-                    )
-                    res = decodense.main(mol, decomp, mf, mo_coeff)
-                    if part == "orbitals":
-                        e_tot = np.sum(res.tot[0]) + np.sum(res.tot[1])
-                        ref = mf_e_tot - mol.energy_nuc()
-                    else:
-                        e_tot = np.sum(res.tot)
-                        ref = mf_e_tot
-                    self.assertAlmostEqual(ref, e_tot, TOL)
+
+        def sub_test(pop_list, part_list):
+            for pop_method in pop_list:
+                for part_pair in part_list:
+                    with self.subTest(pop_method=pop_method, part_pair=part_pair):
+                        part, part_method = part_pair
+                        decomp = decodense.DecompCls(
+                            pop_method=pop_method, part=part, part_method=part_method
+                        )
+                        res = decodense.main(mol, decomp, mf, mo_coeff)
+                        if part == "orbitals":
+                            e_tot = np.sum(res.tot[0]) + np.sum(res.tot[1])
+                            ref = mf_e_tot - mol.energy_nuc()
+                        else:
+                            e_tot = np.sum(res.tot)
+                            ref = mf_e_tot
+                        self.assertAlmostEqual(ref, e_tot, TOL)
+
+
+        # atom- or orbital-wise schemes
+        sub_test(POP_METHOD, PART)
+        # bond-wise schemes
+        sub_test(POP_METHOD_BOND, PART_BOND)
+
 
 
 if __name__ == "__main__":

@@ -200,12 +200,6 @@ def sanity_check(
         raise ValueError(
             "invalid localization exponent. valid choices: 2 (default) or 4"
         )
-    # partitioning and partitioning method
-    # if decomp.part not in ("atoms", "orbitals", "bonds"):
-    #     raise ValueError(
-    #         "invalid partitioning. valid choices: \"atoms\" (default), \"orbitals\", or "
-    #         "\"bonds\""
-    #     )
     if decomp.part == "orbitals":
         logger.warning(
             "Warning: This partitioning only computes electronic energy and does not "
@@ -231,8 +225,7 @@ def sanity_check(
             )
         if decomp.pop_method not in ("mulliken", "iao"):
             raise ValueError(
-                'invalid population scheme for part="bonds". valid choices: "mulliken" or '
-                '"iao" (Mayer bond orders are only implemented for these schemes)'
+                'invalid population scheme for part="bonds". valid choices: "mulliken" or "iao"'
             )
         if decomp.bond_crit not in ("mbo", "lewis", "none"):
             raise ValueError(
@@ -247,7 +240,7 @@ def sanity_check(
             decomp.mbo_thresh is None or decomp.mbo_thresh <= 0
         ):
             raise ValueError(
-                "bond-order-based bond criterion requires a bond order threshold > 0. default value: 0.8"
+                "Mayer bond order based bond criterion requires a bond order threshold > 0. default value: 0.8"
             )
         if (
             decomp.bond_crit == "lewis"

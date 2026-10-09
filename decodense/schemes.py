@@ -161,6 +161,8 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     # unsupported options
     if decomp.prop != "energy":
         raise NotImplementedError("Bond-wise decomposition of dipoles NYI!")
+    if decomp.ndo:
+        raise NotImplementedError("Bond-wise decomposition for NDOs NYI!")
 
     # 1. Compute isolated-atom energies
     atom_ref = _atom_ref(mol, mf)
@@ -182,7 +184,7 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         mo_occ,
         decomp.minao,
         decomp.pop_method,
-        decomp.ndo,
+        False, # decomp.ndo
         decomp.verbose,
         decomp.bond_crit,
         decomp.mbo_thresh,
@@ -214,13 +216,13 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
 
     # unsupported options
     if isinstance(mol, pbc_gto.Cell):
-        raise NotImplementedError("AAP decomposition for periodic systems NYI!")
+        raise NotImplementedError("AAP2B bond-wise decomposition for periodic systems NYI!")
     if decomp.prop != "energy":
-        raise NotImplementedError("AAP decomposition of dipoles NYI!")
+        raise NotImplementedError("Bond-wise decomposition of dipoles NYI!")
     if decomp.ndo:
-        raise NotImplementedError("AAP decomposition for NDOs NYI!")
+        raise NotImplementedError("Bond-wise decomposition for NDOs NYI!")
     if any(hasattr(mf, attr) for attr in ("mm_mol", "with_solvent", "h1e_mmpol")):
-        raise NotImplementedError("AAP decomposition for solvation energies NYI!")
+        raise NotImplementedError("AAP2B bond-decomposition for solvation energies NYI!")
 
     # 1. Compute atomic weights
     weights = assign_rdm1s(
