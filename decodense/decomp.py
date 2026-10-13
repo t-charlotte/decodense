@@ -41,7 +41,7 @@ class InfoKeys:
     bonds = "Bond"
     mo_occ = "Occup."
     orbsym = "Symm."
-    atom_ref = "E_atom_0"
+    atom_ref = "E_ref"
     sum_row = "Sum"
 
 
