@@ -88,14 +88,9 @@ class DecompCls:
         "writename",
         "verbose",
         "unit",
+        "atom_ref",
         "res",
         "res_inter",
-        # below: exclusively for bond-wise decomposition schemes
-        "bond_crit",
-        "mbo_thresh",
-        "smiles",
-        "lewis_image",
-        "trust_atom_order",
     )
 
     def __init__(
@@ -114,11 +109,7 @@ class DecompCls:
         writename: str = "",
         verbose: int = 0,
         unit: str = "au",
-        bond_crit: str = "mbo",  # "mbo", "lewis" or "none"
-        mbo_thresh: float = 0.8,
-        smiles: Optional[str] = None,
-        lewis_image: str = "lewis_structure.png",
-        trust_atom_order: bool = False,
+        atom_ref: Optional[dict] = None,
     ) -> None:
         """
         init molecule attributes
@@ -158,6 +149,7 @@ class DecompCls:
         self.writename = writename
         self.verbose = verbose
         self.unit = unit
+        self.atom_ref = atom_ref
         # set internal defaults
         self.res: dict[str, Union[np.ndarray, list[np.ndarray]]] = {}
         self.res_inter: dict[str, np.ndarray] = {}
@@ -328,6 +320,18 @@ def sanity_check(
             'invalid unit. valid choices: "au" (default), "kcal_mol", "ev", '
             '"kj_mol", or "debye"'
         )
+    # atomic reference values
+    if decomp.atom_ref is not None:
+        if not isinstance(decomp.atom_ref, dict) or not all(
+            isinstance(k, str)
+            and isinstance(v, (int, float, np.integer, np.floating))
+            and not isinstance(v, (bool, np.bool_))
+            for k, v in decomp.atom_ref.items()
+        ):
+            raise TypeError(
+                "invalid atomic reference energies. must be a dictionary of "
+                'real atomic energies formatted as { "atom_label" : atomic_energy }'
+            )
     # mo coefficients
     if not isinstance(mo_coeff, np.ndarray) and not isinstance(mo_coeff, tuple):
         raise TypeError(

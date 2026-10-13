@@ -23,32 +23,22 @@ VERBOSE_INTERMEDIATES = 1
 
 
 def _scheme_atoms(
-        mol,
-        mf,
-        mo_coeff,
-        mo_occ,
-        rdm1,
-        decomp,
-        atom_ref: Optional[np.ndarray] = None,
-    ):
+    mol,
+    mf,
+    mo_coeff,
+    mo_occ,
+    rdm1,
+    decomp,
+):
     """
     This function takes care of atom-wise decompositions:
     1. Compute atomic weights (only if part_method == "mo")
-    2. Compute isolated-atom energies
-    3. Perform the decomposition
-    4. Write the RDM1s if requested
+    2. Perform the decomposition
+    3. Write the RDM1s if requested
     """
 
-    # in case of bond-wise decomposition (A2B)
-    if decomp.part == "bonds":
-        part = "atoms"
-        part_method = "mo"
-    else:
-        part = decomp.part
-        part_method = decomp.part_method
-
     # 1. Compute atomic weights
-    if part_method == "mo":
+    if decomp.part_method == "mo":
         weights = assign_rdm1s(
             mol,
             mf,
@@ -62,11 +52,7 @@ def _scheme_atoms(
     else:
         weights = None
 
-    # 2. Compute isolated-atom energies
-    if atom_ref is None:
-        atom_ref = _atom_ref(mol, mf)
-
-    # 3. Perform the decomposition
+    # 2. Perform the decomposition
     res = prop_tot(
         mol,
         mf,
@@ -80,10 +66,10 @@ def _scheme_atoms(
         decomp.ndo,
         decomp.gauge_origin,
         weights,
-        atom_ref,
+        decomp.atom_ref,
     )
 
-    # 4. Write the RDM1s if requested
+    # 3. Write the RDM1s if requested
     if decomp.write != "":
         write_rdm1(
             mol, part, mo_coeff, mo_occ, decomp.write, decomp.writename, weights
@@ -108,7 +94,7 @@ def _scheme_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.minao,
         decomp.pop_method,
         decomp.prop,
-        None, # decomp.part_method
+        None,  # decomp.part_method
         decomp.ndo,
         decomp.gauge_origin,
         weights=None,
