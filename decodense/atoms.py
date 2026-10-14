@@ -128,6 +128,13 @@ def _e_atom(
         mf_atm = mf_atm.density_fit(auxbasis=mf.with_df.auxbasis)
 
     mf_atm.kernel()
+
+    # if no orbital rotations possible: immediately return solution
+    nmo = mf_atm.mo_coeff[0].shape[1]
+    n_rot = sum(n * (nmo - n) for n in atm.nelec)
+    if mf_atm.converged and n_rot == 0:
+        return mf_atm.e_tot
+
     # lowest energy of a converged solution
     e_best = mf_atm.e_tot if mf_atm.converged else np.inf
 

@@ -64,8 +64,8 @@ class KnownValues(unittest.TestCase):
         mf_e_tot = mf.e_tot
 
         def sub_test(pop_list, part_list):
-            for pop_method in POP_METHOD:
-                for part_pair in PART:
+            for pop_method in pop_list:
+                for part_pair in part_list:
                     with self.subTest(pop_method=pop_method, part_pair=part_pair):
                         part, part_method = part_pair
                         decomp = decodense.DecompCls(

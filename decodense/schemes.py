@@ -16,6 +16,8 @@ from .orbitals import assign_rdm1s
 from .properties import prop_tot
 from .tools import write_rdm1, logger
 
+from typing import Optional
+
 # minimal verbosity for which the intermediates of the bond-wise schemes are returned
 VERBOSE_INTERMEDIATES = 1
 

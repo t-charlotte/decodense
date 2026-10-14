@@ -233,14 +233,20 @@ def sanity_check(
             )
         if decomp.bond_crit == "lewis":
             try:
-                import rdkit  # noqa: F401
+                from rdkit import Chem  # noqa: F401
             except ImportError as err:
                 raise ImportError('bond criterion "lewis" requires RDKit') from err
+            if decomp.smiles is not None and Chem.MolFromSmiles(decomp.smiles) is None:
+                raise ValueError("invalid SMILES string")
+            if not isinstance(decomp.lewis_image, str):
+                raise TypeError("invalid filename for lewis_image. must be a str")
+            if not isinstance(decomp.trust_atom_order, bool):
+                raise TypeError("invalid trust_atom_order argument. must be a bool")
         if decomp.bond_crit == "mbo" and (
             decomp.mbo_thresh is None or decomp.mbo_thresh <= 0
         ):
             raise ValueError(
-                "Mayer bond order based bond criterion requires a bond order threshold > 0. default value: 0.8"
+                "invalid Mayer bond order threshold. valid choices: > 0 (default: 0.8)"
             )
         if (
             decomp.bond_crit == "lewis"
