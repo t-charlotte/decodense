@@ -86,12 +86,12 @@ bond_mask = [
     (0,2), # C0-H2
 ]
 
-# other valid bond mask:
-bond_mask = [
-    True,  # C0-H1
-    True,  # C0-H2
-    False, # H1-H2
-]
+# other valid bond mask
+# bond_mask = [
+#     True,  # C0-H1
+#     True,  # C0-H2
+#     False, # H1-H2
+# ]
 
 # decomposition
 # verbose = 1 prints the intermediates
@@ -108,7 +108,6 @@ del(res)
 
 # decomposition
 # verbose = 1 prints the intermediates
-
 print("\nDecomposition with atomic reference energies and bond mask:")
 decomp = decodense.DecompCls(
     pop_method="iao", part="bonds", part_method="a2b", verbose=1, atom_ref=atom_ref_dict, bond_mask=bond_mask

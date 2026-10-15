@@ -48,6 +48,7 @@ atom_ref_dict = {
     "H": -0.500429058214292,
     "O": -74.97343342944708,
 }
+
 # decomposition
 # default pop_method = "mulliken"
 decomp = decodense.DecompCls(part="atoms", part_method="ao",atom_ref=atom_ref_dict)

@@ -49,8 +49,68 @@ for i, spin_mo in enumerate((alpha, beta)):
 # decomposition
 # by default, all atom pairs will be considered for the decomposition
 # verbose = 1 prints the intermediates
+print("\nDecomposition without atomic reference energies nor bond mask:")
 decomp = decodense.DecompCls(
     pop_method="iao", part="bonds", part_method="aap2b", verbose=1
+)
+res = decodense.main(mol, decomp, mf, tuple(mo_coeff))
+
+set_option("display.max_rows", None, "display.max_columns", None)
+print(res)
+
+del(res)
+
+# atomic reference energies
+atom_ref_dict = {
+    "H": -0.500429058214292,
+    "C": -37.63763262290564,
+}
+
+# decomposition
+# by default, all atom pairs will be considered for the decomposition
+# verbose = 1 prints the intermediates
+print("\nDecomposition with atomic reference energies without bond mask:")
+decomp = decodense.DecompCls(
+    pop_method="iao", part="bonds", part_method="aap2b", verbose=1, atom_ref=atom_ref_dict
+)
+res = decodense.main(mol, decomp, mf, tuple(mo_coeff))
+
+set_option("display.max_rows", None, "display.max_columns", None)
+print(res)
+
+del (res)
+
+# bond mask
+bond_mask = [
+    (0,1), # C0-H1
+    (0,2), # C0-H2
+]
+
+# other valid bond mask:
+# bond_mask = [
+#     True,  # C0-H1
+#     True,  # C0-H2
+#     False, # H1-H2
+# ]
+
+# decomposition
+# verbose = 1 prints the intermediates
+print("\nDecomposition with bond mask without atomic reference energies:")
+decomp = decodense.DecompCls(
+    pop_method="iao", part="bonds", part_method="aap2b", verbose=1, bond_mask=bond_mask
+)
+res = decodense.main(mol, decomp, mf, tuple(mo_coeff))
+
+set_option("display.max_rows", None, "display.max_columns", None)
+print(res)
+
+del(res)
+
+# decomposition
+# verbose = 1 prints the intermediates
+print("\nDecomposition with atomic reference energies and bond mask:")
+decomp = decodense.DecompCls(
+    pop_method="iao", part="bonds", part_method="aap2b", verbose=1, atom_ref=atom_ref_dict, bond_mask=bond_mask
 )
 res = decodense.main(mol, decomp, mf, tuple(mo_coeff))
 
