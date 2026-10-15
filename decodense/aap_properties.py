@@ -29,10 +29,10 @@ JK_BLKSIZE = 16
 def a2ap_redistribute(
     res: dict[str, np.ndarray],
     a2ap_weights: np.ndarray,
-    is_bond: np.ndarray,
+    bond_mask: Optional[np.ndarray] = None,
     atom_ref: Optional[np.ndarray] = None,
     aap: bool = False,
-) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+) -> dict[str, np.ndarray]:
     """
     this function redistributes atom-wise (aap = False) or
     atom-and-atom-pair-wise (aap = True) energies over the bonds:
@@ -44,17 +44,20 @@ def a2ap_redistribute(
        same way and subtracted from the total energy, saved under CompKeys.tot_rel
     only the keys in PROP_KEYS are redistributed, all other keys are discarded.
     returns:
-    - the bond-wise results, ordered according to np.where(is_bond)
-    - the atom-wise energies after step 1 (intermediates)
+    - the bond-wise results
     note: assumes that the rows of a2ap_weights are normalized, in order to achieve a
     lossless decomposition (atoms without bonds have zero weights, see bond_mbo)
     """
     natm, npairs = a2ap_weights.shape
-    iu0, iu1 = np.triu_indices(natm, k=1)
-    nb = ~is_bond
+    if bond_mask is None:
+        bond_mask = np.ones(npairs, dtype=bool) # treat every atom pair as a bond
+    nb = ~bond_mask
 
     # weights from atoms to bonds only
-    a2b_weights = a2ap_weights[:, is_bond]
+    a2b_weights = a2ap_weights[:, bond_mask]
+
+    # atom and bond indices
+    iu0, iu1 = np.triu_indices(natm, k=1)
 
     bond_res: dict[str, np.ndarray] = {}
 
@@ -74,7 +77,7 @@ def a2ap_redistribute(
                 np.bincount(iu0[nb], weights=e_pair[nb], minlength=natm)
                 + np.bincount(iu1[nb], weights=e_pair[nb], minlength=natm)
             )
-            e_bond = e_pair[is_bond]
+            e_bond = e_pair[bond_mask]
         else:
             if v.shape != (natm,):
                 raise ValueError(
@@ -89,7 +92,7 @@ def a2ap_redistribute(
         bond_res[CompKeys.tot_rel] = bond_res[CompKeys.tot] - atom_ref @ a2b_weights
 
     # atom indices of the bonds
-    bond_res[CompKeys.bonds] = np.column_stack((iu0[is_bond], iu1[is_bond]))
+    bond_res[CompKeys.bonds] = np.column_stack((iu0[bond_mask], iu1[bond_mask]))
 
     return bond_res
 

@@ -24,29 +24,6 @@ from .decomp import CompKeys
 BLKSIZE = 200
 
 
-def atom_ref_energies(
-    mol: Union[gto.Mole, pbc_gto.Cell],
-    atom_ref: dict,
-) -> np.ndarray:
-    """
-    this function returns an array with the atomic reference energies
-    taken from the provided atom_ref dictionary
-    and ordered according to the atom order in the provided mol object
-    """
-
-    e_ref = np.zeros(mol.natm, dtype=np.float64)
-    for i in range(mol.natm):
-        a_symbol = mol.atom_symbol(i)
-        try:
-            e_ref[i] = atom_ref[a_symbol]
-        except KeyError as err:
-            raise KeyError(
-                f"atomic reference energy for atom {i} with symbol {a_symbol} not found in the provided atom_ref dictionary"
-            ) from err
-
-    return e_ref
-
-
 def prop_tot(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[
@@ -67,7 +44,7 @@ def prop_tot(
     ndo: bool,
     gauge_origin: np.ndarray,
     weights: Optional[list[np.ndarray]],
-    atom_ref: Optional[dict] = None,
+    atom_ref: Optional[np.ndarray] = None,
 ) -> dict[str, Union[np.ndarray, list[np.ndarray]]]:
     """
     this function returns atom-decomposed and orbital-decomposed mean-field properties
@@ -449,9 +426,8 @@ def prop_tot(
         prop[CompKeys.tot] = prop[CompKeys.el] + prop[CompKeys.struct]
 
         if (prop_type == "energy") and (atom_ref is not None):
-            atom_ref_e = atom_ref_energies(mol, atom_ref)
-            prop[CompKeys.atom_ref] = atom_ref_e
-            prop[CompKeys.tot_rel] = prop[CompKeys.tot] - atom_ref_e
+            prop[CompKeys.atom_ref] = atom_ref
+            prop[CompKeys.tot_rel] = prop[CompKeys.tot] - atom_ref
 
         return {**prop}
     else:  # orbs

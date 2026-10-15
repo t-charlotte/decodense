@@ -45,4 +45,22 @@ stable, direction = loc.stability_check()
 decomp = decodense.DecompCls(pop_method="iao", part="atoms")
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
+print("Decomposition without atomic reference energies:")
+print(res)
+
+del(res)
+
+# atomic reference energies:
+atom_ref_dict = {
+    "H": -0.500429058214292,
+    "C": -37.63763262290564,
+    "O": -74.97343342944708,
+}
+
+# decomposition
+# default part_method = "mo"
+decomp = decodense.DecompCls(pop_method="iao", part="atoms", atom_ref=atom_ref_dict)
+res = decodense.main(mol, decomp, mf, mo_coeff)
+
+print("\nDecomposition with atomic reference energies:")
 print(res)

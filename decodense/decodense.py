@@ -15,7 +15,7 @@ from typing import Union, Optional
 from .decomp import DecompCls, sanity_check
 from .orbitals import assign_rdm1s
 from .properties import prop_tot
-from .tools import write_rdm1, logger_config
+from .tools import atom_ref_energies, write_rdm1, logger_config
 from .results import ResultsCls
 from .schemes import SCHEMES
 
@@ -62,6 +62,20 @@ def main(
                 mo_occ = 2 * (mo_occ / 2,)
         else:
             mo_occ = tuple(mo_occ)
+
+    # transform atomic reference energies from dictionary to list
+    if decomp.atom_ref is not None:
+        decomp.atom_ref = atom_ref_energies(mol, decomp.atom_ref)
+
+    # transform bond mask from list of tuples to list of bools
+    if decomp.bond_mask is not None:
+        bond_mask = np.asarray(decomp.bond_mask)
+        if bond_mask.dtype != bool:
+            is_bond = np.zeros((mol.natm, mol.natm), dtype=bool)
+            is_bond[bond_mask[:, 0], bond_mask[:, 1]] = True
+            is_bond |= is_bond.T # (A,B) and (B,A) denote the same bond
+            decomp.bond_mask = is_bond[np.triu_indices(mol.natm, k=1)]
+        # do some transformation
 
     scheme = SCHEMES[(decomp.part, decomp.part_method)]
     decomp.res_inter = {}  # reset intermediates of a previous run

@@ -39,4 +39,22 @@ mo_coeff = 2 * (mf.mo_coeff[:, occ_mo],)
 decomp = decodense.DecompCls(part="atoms", part_method="ao")
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
+print("Decomposition without atomic reference energies:")
+print(res)
+
+del(res)
+
+# atomic reference energies:
+atom_ref_dict = {
+    "H": -0.500429058214292,
+    "C": -37.63763262290564,
+    "O": -74.97343342944708,
+}
+
+# decomposition
+# default pop_method = "mulliken"
+decomp = decodense.DecompCls(part="atoms", part_method="ao", atom_ref=atom_ref_dict)
+res = decodense.main(mol, decomp, mf, mo_coeff)
+
+print("\nDecomposition with atomic reference energies:")
 print(res)

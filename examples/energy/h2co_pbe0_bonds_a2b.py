@@ -42,8 +42,7 @@ mo_coeff = loc.kernel()
 stable, direction = loc.stability_check()
 
 # decomposition
-# default bond criterion is "mbo"
-# default MBO threshold is 0.8
+# by default, all atom pairs will be considered for the decomposition
 # verbose = 1 prints the intermediates
 decomp = decodense.DecompCls(
     pop_method="iao", part="bonds", part_method="a2b", verbose=1

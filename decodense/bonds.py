@@ -19,7 +19,6 @@ from pyscf.data import radii
 from pyscf import tools as pyscf_tools
 
 from .tools import make_rdm1, contract, dim, make_mbo, logger, unique_filename
-from .bond_criteria import get_bond_mask
 
 from typing import Union, Optional
 
@@ -36,13 +35,7 @@ def bond_mbo(
     pop_method: str,
     ndo: bool,
     verbose: int,
-    # input variables below: default value is controlled
-    # by __init__ in decomp.py
-    bond_crit: str,
-    mbo_thresh: float,
-    smiles: Optional[str],
-    lewis_image: str,
-    trust_atom_order: bool,
+    bond_mask: Optional[np.ndarray] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     This function calculates the Mayer bond orders (MBOs) for the given molecule.
@@ -142,10 +135,9 @@ def bond_mbo(
         mbo_AtoAP[a2_idx, ap_idx] = ap_mbo_scr
 
         # bond criterion: weights of atom pairs that are not bonds are set to zero
-        is_bond = get_bond_mask(
-            mol, mbo, bond_crit, mbo_thresh, smiles, lewis_image, trust_atom_order
-        )
-        mbo_AtoAP[:, ~is_bond] = 0.0
+        if bond_mask is not None:
+            assert(len(bond_mask) == npairs), f'expected a bond_mask of length {npairs} but received length {len(bond_mask)}'
+            mbo_AtoAP[:, ~bond_mask] = 0.0
 
         # atoms without bonds: their energy is discarded in the bond-wise decomposition
         no_bonds = np.all(mbo_AtoAP == 0.0, axis=1)
@@ -160,7 +152,7 @@ def bond_mbo(
         row_nonzero = ~np.all(mbo_AtoAP == 0.0, axis=1)
         mbo_AtoAP[row_nonzero] /= row_sums[row_nonzero, None]
 
-        return mbo_AtoAP, is_bond
+        return mbo_AtoAP
 
     # end def _mbo_atom_to_bond()
 
@@ -225,14 +217,14 @@ def bond_mbo(
         rdm1_a,  # alpha RDM1
         rdm1_b,  # beta RDM1
     )
-    mbo_AtoAP, is_bond = _mbo_atom_to_ap(mbo)
+    mbo_AtoAP = _mbo_atom_to_ap(mbo)
 
     # verbose print
     if verbose >= VERBOSE_MBO:
         a_labels = [f"{pmol.atom_pure_symbol(k)}{k}" for k in range(pmol.natm)]
         ap_labels = [
             f"{mol.atom_symbol(a1)}{a1}-{mol.atom_symbol(a2)}{a2}{'*' if bond else ''}"
-            for a1, a2, bond in zip(a1_idx, a2_idx, is_bond)
+            for a1, a2, bond in zip(a1_idx, a2_idx, bond_mask)
         ]
         ap_mbo = mbo[a_idx, ap_idx]
 
@@ -269,7 +261,7 @@ def bond_mbo(
                 f"\n WARNING: could not write atom-to-bond weight matrix to {filename} "
                 f"({type(err).__name__}: {err})\n"
             )
-    return mbo_AtoAP, is_bond
+    return mbo_AtoAP
 
 
 # end def bond_mbo()

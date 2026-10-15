@@ -89,6 +89,7 @@ class DecompCls:
         "verbose",
         "unit",
         "atom_ref",
+        "bond_mask",
         "res",
         "res_inter",
     )
@@ -110,6 +111,7 @@ class DecompCls:
         verbose: int = 0,
         unit: str = "au",
         atom_ref: Optional[dict] = None,
+        bond_mask: Optional[Union[np.ndarray, list]] = None,
     ) -> None:
         """
         init molecule attributes
@@ -126,12 +128,6 @@ class DecompCls:
                 'Warning: part="eda" is deprecated; use part="atoms", part_method="ao" instead'
             )
             part, part_method = "atoms", "ao"
-        elif part == "bonds":
-            self.bond_crit = bond_crit
-            self.mbo_thresh = mbo_thresh
-            self.smiles = smiles
-            self.lewis_image = lewis_image
-            self.trust_atom_order = trust_atom_order
         # end if
         if part_method is None:
             part_method = {"atoms": "mo"}.get(part)
@@ -150,6 +146,10 @@ class DecompCls:
         self.verbose = verbose
         self.unit = unit
         self.atom_ref = atom_ref
+        if bond_mask is None:
+            self.bond_mask = bond_mask
+        else:
+            self.bond_mask = np.asarray(bond_mask)
         # set internal defaults
         self.res: dict[str, Union[np.ndarray, list[np.ndarray]]] = {}
         self.res_inter: dict[str, np.ndarray] = {}
@@ -219,33 +219,6 @@ def sanity_check(
             raise ValueError(
                 'invalid population scheme for part="bonds". valid choices: "mulliken" or "iao"'
             )
-        if decomp.bond_crit not in ("mbo", "lewis", "none"):
-            raise ValueError(
-                'invalid bond criterion. valid choices: "mbo" (default), "lewis" or "none"'
-            )
-        if decomp.bond_crit == "lewis":
-            try:
-                from rdkit import Chem  # noqa: F401
-            except ImportError as err:
-                raise ImportError('bond criterion "lewis" requires RDKit') from err
-            if decomp.smiles is not None and Chem.MolFromSmiles(decomp.smiles) is None:
-                raise ValueError("invalid SMILES string")
-            if not isinstance(decomp.lewis_image, str):
-                raise TypeError("invalid filename for lewis_image. must be a str")
-            if not isinstance(decomp.trust_atom_order, bool):
-                raise TypeError("invalid trust_atom_order argument. must be a bool")
-        if decomp.bond_crit == "mbo" and (
-            decomp.mbo_thresh is None or decomp.mbo_thresh <= 0
-        ):
-            raise ValueError(
-                "invalid Mayer bond order threshold. valid choices: > 0 (default: 0.8)"
-            )
-        if (
-            decomp.bond_crit == "lewis"
-            and decomp.trust_atom_order
-            and decomp.smiles is None
-        ):
-            raise ValueError("trust_atom_order requires a SMILES string")
     else:
         raise ValueError(
             'invalid partitioning. valid choices: "atoms" (default), "orbitals" or "bonds"'
@@ -332,6 +305,40 @@ def sanity_check(
                 "invalid atomic reference energies. must be a dictionary of "
                 'real atomic energies formatted as { "atom_label" : atomic_energy }'
             )
+    # bond mask
+    if decomp.bond_mask is not None:
+        bond_mask = np.asarray(decomp.bond_mask)
+        is_bool_mask = bond_mask.dtype == bool and bond_mask.ndim == 1
+        is_pair_list = (
+            np.issubdtype(bond_mask.dtype, np.integer)
+            and bond_mask.ndim == 2
+            and bond_mask.shape[1] == 2
+        )
+        if not (is_bool_mask or is_pair_list):
+            raise TypeError(
+                "invalid bond mask. must be a list or numpy array of booleans, "
+                "or a list or numpy array of tuples of two atom indices"
+            )
+        if is_bool_mask and len(bond_mask) != mol.natm*(mol.natm-1)//2:
+            raise ValueError(
+                "invalid bond mask. a boolean bond mask must have length npairs = natm*(natm-1)/2"
+            )
+        if is_pair_list:
+            # at least one atom pair must be provided
+            if len(bond_mask) == 0:
+                raise ValueError(
+                    "invalid bond mask. must contain at least one atom pair"
+                )
+            # provided integers must be valid atom indices
+            if not ((bond_mask >= 0).all() and (bond_mask < mol.natm).all()):
+                raise ValueError(
+                    "invalid bond mask. atom indices must be between 0 and natm - 1"
+                )
+            # provided bonds must be between two different atoms
+            if not (bond_mask[:, 0] != bond_mask[:, 1]).all():
+                raise ValueError(
+                    "invalid bond mask. atom pairs must contain two different atoms"
+                )
     # mo coefficients
     if not isinstance(mo_coeff, np.ndarray) and not isinstance(mo_coeff, tuple):
         raise TypeError(

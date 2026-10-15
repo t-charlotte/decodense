@@ -41,9 +41,19 @@ ATOM_REF_E = {
     "O": -73.80415023325594,
 }
 
+# bond mask for H2O (not permuted)
+BOND_MASK = [
+    (0,1), # O0-H1
+    (0,2), # O0-H2
+]
+
 
 @pytest.fixture(params=[None, ATOM_REF_E], ids=["no_ref", "atom_ref"])
 def atom_ref(request):
+    return request.param
+
+@pytest.fixture(params=[None, BOND_MASK], ids=["no_mask", "bond_mask"])
+def bond_mask(request):
     return request.param
 
 
@@ -75,12 +85,12 @@ def test_permute(mf_h2o_rhf, mf_h2o_permute, part_method, atom_ref):
 
 # every contribution must match for symmetry-equivalent atoms
 @pytest.mark.parametrize("part_method", ["mo", "ao"])
-def test_symmetry_equivalent_atoms(mf_h2o_rhf, part_method, atom_ref):
+def test_symmetry_equivalent_atoms(mf_h2o_rhf, part_method, atom_ref, bond_mask):
     mol = mf_h2o_rhf.mol
     mo = mf_h2o_rhf.mo_coeff[:, mf_h2o_rhf.mo_occ > 0.0]
     mo_occ = (np.ones(mo.shape[1]), np.ones(mo.shape[1]))
     decomp = DecompCls(
-        pop_method="iao", part="atoms", part_method=part_method, atom_ref=atom_ref
+        pop_method="iao", part="atoms", part_method=part_method, atom_ref=atom_ref, bond_mask=bond_mask
     )
     res = main(mol, decomp, mf_h2o_rhf, (mo, mo), mo_occ)
     for val in res.res_dict.values():

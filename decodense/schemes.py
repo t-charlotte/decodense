@@ -9,7 +9,6 @@ import numpy as np
 from pyscf.pbc import gto as pbc_gto
 
 from .aap_properties import aap_prop_tot, a2ap_redistribute
-from .atoms import atom_ref_energies
 from .bonds import bond_mbo
 from .decomp import CompKeys
 from .orbitals import assign_rdm1s
@@ -37,8 +36,15 @@ def _scheme_atoms(
     3. Write the RDM1s if requested
     """
 
+    if decomp.part == "bonds":
+        part = "atoms"
+        part_method = "mo"
+    else:
+        part = "atoms"
+        part_method = "ao"
+
     # 1. Compute atomic weights
-    if decomp.part_method == "mo":
+    if part_method == "mo":
         weights = assign_rdm1s(
             mol,
             mf,
@@ -85,7 +91,7 @@ def _scheme_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     """
     This function takes care of orbital-wise decompositions.
     """
-    return prop_tot(
+    res = prop_tot(
         mol,
         mf,
         mo_coeff,
@@ -100,22 +106,16 @@ def _scheme_orbitals(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         weights=None,
     )
 
+    # Write the RDM1s if requested
+    if decomp.write != "":
+        write_rdm1(
+            mol, decomp.part, mo_coeff, mo_occ, decomp.write, decomp.writename, weights
+        )
+
+    return res
+
 
 # end _scheme_orbitals
-
-def _atom_ref(mol, mf):
-    """
-    This function returns the gas-phase isolated-atom energies
-    """
-    if any(hasattr(mf, attr) for attr in ("with_solvent", "mm_mol", "h1e_mmpol")):
-        logger.warning(
-            "Warning: the molecular energy includes solvation, but the isolated-atom "
-            f'energies are calculated in the gas phase ("{CompKeys.tot_rel}").'
-        )
-    return atom_ref_energies(mol, mf)
-
-
-# end _atom_ref
 
 
 def _add_intermediates(decomp, atom_res, atom_ref):
@@ -125,12 +125,13 @@ def _add_intermediates(decomp, atom_res, atom_ref):
     (printed as a separate results object)
     """
     e_tot = atom_res[CompKeys.tot]
-    # isolated-atom energies only exist for atoms: zeros for the atom pairs (aap2b)
-    atom_ref = np.concatenate((atom_ref, np.zeros(e_tot.size - atom_ref.size)))
-    decomp.res_inter = {
-        CompKeys.tot: e_tot,
-        CompKeys.atom_ref: atom_ref,
-    }
+    res_inter = { CompKeys.tot : e_tot }
+
+    if atom_ref is not None:
+        # isolated-atom energies only exist for atoms: zeros for the atom pairs (aap2b)
+        res_inter[CompKeys.atom_ref] = np.concatenate((atom_ref, np.zeros(e_tot.size - atom_ref.size)))
+
+    decomp.res_inter = res_inter
 
 
 # end _add_intermediates
@@ -152,12 +153,9 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     if decomp.ndo:
         raise NotImplementedError("Bond-wise decomposition for NDOs NYI!")
 
-    # 1. Compute isolated-atom energies
-    atom_ref = _atom_ref(mol, mf)
-
     # 2. Perform an atom-wise decomposition
     atom_res = _scheme_atoms(  # NOTE: MO for now -> how to implement choosing AO?
-        mol, mf, mo_coeff, mo_occ, rdm1, decomp, atom_ref
+        mol, mf, mo_coeff, mo_occ, rdm1, decomp
     )
     logger.warning(
         'The "a2b" bond-wise decomposition scheme uses '
@@ -165,7 +163,7 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     )
 
     # 3. Compute bond weights
-    bond_weights, is_bond = bond_mbo(
+    bond_weights = bond_mbo(
         mol,
         mf,
         mo_coeff,
@@ -174,17 +172,13 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         decomp.pop_method,
         False, # decomp.ndo
         decomp.verbose,
-        decomp.bond_crit,
-        decomp.mbo_thresh,
-        decomp.smiles,
-        decomp.lewis_image,
-        decomp.trust_atom_order,
+        decomp.bond_mask,
     )
 
     # 4. Perform the bond-wise decomposition
-    bond_res = a2ap_redistribute(atom_res, bond_weights, is_bond, atom_ref, aap=False)
+    bond_res = a2ap_redistribute(atom_res, bond_weights, decomp.bond_mask, decomp.atom_ref, aap=False)
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
-        _add_intermediates(decomp, atom_res, atom_ref)
+        _add_intermediates(decomp, atom_res, decomp.atom_ref)
     return bond_res
 
 
@@ -237,29 +231,22 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     )
 
     # 3. Compute bond weights
-    aap2b_weights, is_bond = bond_mbo(
+    aap2b_weights = bond_mbo(
         mol,
         mf,
         mo_coeff,
         mo_occ,
         decomp.minao,
         decomp.pop_method,
-        decomp.ndo,
+        False, # decomp.ndo
         decomp.verbose,
-        decomp.bond_crit,
-        decomp.mbo_thresh,
-        decomp.smiles,
-        decomp.lewis_image,
-        decomp.trust_atom_order,
+        decomp.bond_mask,
     )
 
-    # 4. Compute isolated-atom energies
-    atom_ref = _atom_ref(mol, mf)
-
     # 5. Perform the bond-wise decomposition
-    bond_res = a2ap_redistribute(aap_res, aap2b_weights, is_bond, atom_ref, aap=True)
+    bond_res = a2ap_redistribute(aap_res, aap2b_weights, decomp.bond_mask, decomp.atom_ref, aap=True)
     if decomp.verbose >= VERBOSE_INTERMEDIATES:
-        _add_intermediates(decomp, aap_res, atom_ref)
+        _add_intermediates(decomp, aap_res, decomp.atom_ref)
     return bond_res
 
 

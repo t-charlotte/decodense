@@ -3,8 +3,19 @@
 
 import numpy as np
 import pytest
+from pyscf import gto
 from decodense.decomp import DecompCls, sanity_check
 
+
+@pytest.fixture(scope="module")
+def mol_h2o():
+    return gto.M(
+        verbose=0,
+        output=None,
+        basis="sto-3g",
+        symmetry=True,
+        atom="geom/h2o.xyz",
+    )
 
 # DecompCls
 # DecompCls must set the correct part/part_method defaults
@@ -64,12 +75,20 @@ def test_decomp_cls_part_method_defaults():
             TypeError,
             "invalid atomic reference energies",
         ),  # key must be a string
+        ("bond_mask", [123], TypeError, "invalid bond mask"), # bond mask must be either bool or tuple
+        ("bond_mask", np.empty(0, dtype=bool), ValueError, "invalid bond mask"), # bond mask must not be empty
+        ("bond_mask", np.empty((0, 2), dtype=int), ValueError, "invalid bond mask"), # bond mask must not be empty
+        ("bond_mask", [True, True], ValueError, "invalid bond mask"), # boolean bond mask must have length npairs
+        ("bond_mask", [(0,1,2)], TypeError, "invalid bond mask"), # tuples must have exactly two elements
+        ("bond_mask", [(0,0)], ValueError, "invalid bond mask"), # atom pairs cannot be between the same atom
+        ("bond_mask", [(-1,0)], ValueError, "invalid bond mask"), # atom indices must be larger than 0
+        ("bond_mask", [(0,4)], ValueError, "invalid bond mask"), # atom indices must be smaller than natm (h2o -> 3)
     ],
 )
-def test_sanity_check_rejects_invalid_attr(attr, bad_value, exception, message):
+def test_sanity_check_rejects_invalid_attr(attr, bad_value, exception, message, mol_h2o):
     decomp = DecompCls(**{attr: bad_value})
     with pytest.raises(exception, match=message):
-        sanity_check(None, None, decomp, np.zeros((2, 2)), None)
+        sanity_check(mol_h2o, None, decomp, np.zeros((2, 2)), None)
 
 
 # sanity check must reject an invalid gauge_origin

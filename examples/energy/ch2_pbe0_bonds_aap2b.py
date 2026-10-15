@@ -47,8 +47,7 @@ for i, spin_mo in enumerate((alpha, beta)):
     stable, direction = loc.stability_check()
 
 # decomposition
-# default bond_criterion = "mbo"
-# default MBO threshold is 0.8
+# by default, all atom pairs will be considered for the decomposition
 # verbose = 1 prints the intermediates
 decomp = decodense.DecompCls(
     pop_method="iao", part="bonds", part_method="aap2b", verbose=1
