@@ -40,8 +40,8 @@ def _scheme_atoms(
         part = "atoms"
         part_method = "mo"
     else:
-        part = "atoms"
-        part_method = "ao"
+        part = decomp.part
+        part_method = decomp.part_method
 
     # 1. Compute atomic weights
     if part_method == "mo":

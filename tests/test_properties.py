@@ -6,14 +6,15 @@ import pytest
 from unittest.mock import patch
 from decodense.properties import (
     _dip_nuc,
+    _trace,
+    _e_nuc,
+)
+from decodense.prop_tools import (
     _get_nuc,
     _h_core,
     _make_rho,
     _make_rho_interm2,
-    _trace,
-    _e_xc,
     _xc_ao_deriv,
-    _e_nuc,
 )
 from pyscf import gto, dft
 from pyscf.dft import numint
@@ -127,10 +128,10 @@ def test_xc_ao_deriv(xc_func, expected):
     assert _xc_ao_deriv(xc_func) == expected
 
 
-# unrecognised xc_type must raise UnboundLocalError
+# unrecognised xc_type must raise NotImplementedError
 def test_xc_ao_deriv_unknown_type():
     with patch("pyscf.dft.libxc.xc_type", return_value="UNKNOWN"):
-        with pytest.raises(UnboundLocalError):
+        with pytest.raises(NotImplementedError):
             _xc_ao_deriv("anything")
 
 
@@ -201,20 +202,3 @@ def test_trace_3d():
     rdm1 = np.array([[2.0, 1.0], [1.0, 3.0]])
     assert np.array_equal(_trace(op, rdm1), [19.0, 2.0, 5.0])
     assert np.array_equal(_trace(op, rdm1, scaling=0.5), [9.5, 1.0, 2.5])
-
-
-# _e_xc
-# xc energy must match hand-derived value for a 1d electron density
-def test_e_xc_1d():
-    eps_xc = np.array([1.0, 2.0, 3.0])
-    grid_weights = np.array([2.0, 1.0, 0.5])
-    rho = np.array([1.0, 2.0, 3.0])
-    assert _e_xc(eps_xc, grid_weights, rho) == 10.5
-
-
-# xc energy must match hand-derived value for a 2d electron density
-def test_e_xc_2d():
-    eps_xc = np.array([1.0, 1.0, 1.0])
-    grid_weights = np.array([1.0, 1.0, 1.0])
-    rho = np.array([[1.0, 2.0, 3.0], [99.0, 99.0, 99.0]])
-    assert _e_xc(eps_xc, grid_weights, rho) == 6.0
