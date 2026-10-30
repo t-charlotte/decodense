@@ -23,9 +23,12 @@ XCPart = Union[np.ndarray, list[np.ndarray]]
 def _h_core(
     mol: Union[gto.Mole, pbc_gto.Cell],
     mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT, pbc_scf.RHF],
+    rdm1: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    this function returns the components of the core hamiltonian
+    this function returns the kinetic and total nuclear attraction operators, and the
+    nuclear attraction energies tr(V_K D) of the individual atomic potentials V_K
+    (rdm1: spin-summed 1-RDM)
     """
     if not isinstance(mol, pbc_gto.Cell) and mol.has_ecp():
         raise NotImplementedError("Decodense does not support ECP")
@@ -37,29 +40,35 @@ def _h_core(
         mydf = mf.with_df
         # individual atomic potentials
         sub_nuc = get_nuc_pbc(mol, mydf)
+        # total nuclear potential
+        nuc = np.sum(sub_nuc, axis=0)
+        e_nuc = sub_nuc.reshape(sub_nuc.shape[0], -1) @ rdm1.ravel()
     else:
         # kinetic integrals
         kin = mol.intor_symmetric("int1e_kin")
-        # individual atomic potentials
-        sub_nuc = _get_nuc(mol)
-    # total nuclear potential
-    nuc = np.sum(sub_nuc, axis=0)
-    return kin, nuc, sub_nuc
+        # total nuclear potential and individual nuclear attraction energies
+        nuc, e_nuc = _get_nuc(mol, rdm1)
+    return kin, nuc, e_nuc
 
 
-def _get_nuc(mol: gto.Mole) -> np.ndarray:
+def _get_nuc(mol: gto.Mole, rdm1: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    individual atomic potentials for molecules
+    total nuclear potential and nuclear attraction energies tr(V_K D) of the
+    individual atomic potentials V_K for molecules (V_K is only stored for one atom
+    at a time)
     """
     # coordinates and charges of nuclei
     coords = mol.atom_coords()
     charges = mol.atom_charges()
-    # individual atomic potentials
-    sub_nuc = np.zeros([mol.natm, mol.nao_nr(), mol.nao_nr()], dtype=np.float64)
+    # sum of and traces with individual atomic potentials
+    nuc = np.zeros((mol.nao_nr(), mol.nao_nr()), dtype=np.float64)
+    e_nuc = np.zeros(mol.natm, dtype=np.float64)
     for k in range(mol.natm):
         with mol.with_rinv_origin(coords[k]):
-            sub_nuc[k] = -1.0 * mol.intor("int1e_rinv") * charges[k]
-    return sub_nuc
+            sub_nuc = -1.0 * charges[k] * mol.intor_symmetric("int1e_rinv")
+        nuc += sub_nuc
+        e_nuc[k] = np.einsum("ij,ij", sub_nuc, rdm1)
+    return nuc, e_nuc
 
 
 def _xc_ao_deriv(xc_func: str) -> tuple[str, int]:
@@ -284,7 +293,12 @@ def _nlc_blocks(
     grid
     (adapted from: rks.get_veff and numint.nr_nlc_vxc in PySCF)
     """
-    _build_grids(mf.nlcgrids)
+    if mf.nlcgrids.coords is None or mf.nlcgrids.weights is None:
+        logger.warning(
+            f'\nCalculating nlcgrids for mf.xc="{mf.xc}" with mf.nlcgrids.level={mf.nlcgrids.level}\n'
+            "Should you wish to use other values, please set mf.xc and mf.nlcgrids.level in your input.\n"
+        )
+        mf.nlcgrids.build(with_non0tab=True)
     nlc_xc = mf.xc if mf._numint.libxc.is_nlc(mf.xc) else mf.nlc
     coords, weights = mf.nlcgrids.coords, mf.nlcgrids.weights
     ao_value_nlc = _ao_val(mol, coords, 1)
