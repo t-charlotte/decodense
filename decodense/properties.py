@@ -144,9 +144,6 @@ def prop_tot(
                 mol, mf, mo_coeff, mo_occ, rdm1, weights, part_method, natm
             )
 
-    # molecular dimensions
-    alpha, beta = dim(mo_occ)
-
     # atomic labels
     if part_method == "ao":
         ao_labels = mol.ao_labels(fmt=None)

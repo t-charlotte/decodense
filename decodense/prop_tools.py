@@ -14,7 +14,7 @@ from pyscf.pbc.dft import numint as pbc_numint
 from typing import Union, Optional, Iterable, Iterator
 
 from .pbctools import get_nuc_pbc
-from .tools import dim, contract
+from .tools import dim, contract, logger
 
 # atom-wise (array) or orbital-wise (list of arrays per spin) xc energies
 XCPart = Union[np.ndarray, list[np.ndarray]]
@@ -212,14 +212,6 @@ def _ao_val(mol: gto.Mole, grids_coords: np.ndarray, ao_deriv: int) -> np.ndarra
         return pbc_numint.eval_ao(mol, grids_coords, deriv=ao_deriv)
 
 
-def _build_grids(grids) -> None:
-    """
-    this function builds a dft grid (coordinates & weights) if not yet present
-    """
-    if grids.coords is None or grids.weights is None:
-        grids.build(with_non0tab=True)
-
-
 def _orb_atom_occ(
     mo_occ: tuple[np.ndarray, np.ndarray],
     weights: list[np.ndarray],
@@ -246,15 +238,21 @@ def _xc_blocks(
     rdm1: np.ndarray,
     xc_type: str,
     ao_deriv: int,
-) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+) -> Iterator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
-    this function yields ao values (without derivatives) and weighted xc energy
-    densities, w(r) eps_xc(r), block-wise on the dft grid (for molecules, ao values are
-    never stored for the full grid)
+    this function yields ao values (without derivatives), weighted xc energy
+    densities, w(r) eps_xc(r), and the rho intermediate c0 = ao . D (D summed over
+    spins), block-wise on the dft grid (for molecules, ao values are never stored for
+    the full grid)
     """
     if xc_type == "HF":
         return
-    _build_grids(mf.grids)
+    if mf.grids.coords is None or mf.grids.weights is None:
+        logger.warning(
+            f'\nCalculating grids for mf.xc="{mf.xc}" with mf.grids.level={mf.grids.level}\n'
+            "Should you wish to use other values, please set mf.xc and mf.grids.level in your input.\n"
+        )
+        mf.grids.build(with_non0tab=True)
     if isinstance(mol, pbc_gto.Cell):
         # pbc block_loop has a different interface -> single block
         blocks: Iterable = [
@@ -270,60 +268,73 @@ def _xc_blocks(
         )
     xc_spin = 0 if np.allclose(rdm1[0], rdm1[1]) else 1
     for ao, weight in blocks:
-        _, _, rho = _make_rho(ao, rdm1, xc_type)
-        eps_xc = dft.libxc.eval_xc(mf.xc, rho, spin=xc_spin)[0]
-        yield (ao if ao.ndim == 2 else ao[0]), weight * eps_xc
+        c0, c1, rho = _make_rho(ao, rdm1, xc_type)
+        # c1 is only needed for rho
+        del c1
+        eps_xc = dft.libxc.eval_xc(mf.xc, rho, spin=xc_spin, deriv=0)[0]
+        yield (ao if ao.ndim == 2 else ao[0]), weight * eps_xc, c0
+        # free c0 before the next block is evaluated
+        del c0
 
 
 def _nlc_blocks(
     mol: gto.Mole, mf: dft.rks.KohnShamDFT, rdm1: np.ndarray
-) -> list[tuple[np.ndarray, np.ndarray]]:
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
-    this function returns ao values (without derivatives) and weighted nlc (vv10)
-    energy densities, w(r) eps_nlc(r), on the nlc grid
+    this function returns ao values (without derivatives), weighted nlc (vv10)
+    energy densities, w(r) eps_nlc(r), and the rho intermediate c0 = ao . D on the nlc
+    grid
     (adapted from: rks.get_veff and numint.nr_nlc_vxc in PySCF)
     """
-    _build_grids(mf.nlcgrids)
+    if mf.nlcgrids.coords is None or mf.nlcgrids.weights is None:
+        logger.warning(
+            f'\nCalculating nlcgrids for mf.xc=\"{mf.xc}\" with mf.nlcgrids.level={mf.nlcgrids.level}\n'
+            "Should you wish to use other values, please set mf.xc and mf.nlcgrids.level in your input.\n"
+        )
+        mf.nlcgrids.build(with_non0tab=True)
     nlc_xc = mf.xc if mf._numint.libxc.is_nlc(mf.xc) else mf.nlc
     coords, weights = mf.nlcgrids.coords, mf.nlcgrids.weights
     ao_value_nlc = _ao_val(mol, coords, 1)
-    _, _, rho_vv10 = _make_rho(ao_value_nlc, np.sum(rdm1, axis=0), "GGA")
+    c0_vv10, _, rho_vv10 = _make_rho(ao_value_nlc, np.sum(rdm1, axis=0), "GGA")
     eps_xc_nlc = sum(
         fac * numint._vv10nlc(rho_vv10, coords, rho_vv10, weights, coords, nlc_pars)[0]
         for nlc_pars, fac in mf._numint.nlc_coeff(nlc_xc)
     )
-    return [(ao_value_nlc[0], weights * eps_xc_nlc)]
+    return [(ao_value_nlc[0], weights * eps_xc_nlc, c0_vv10)]
 
 
 def _xc_partition(
-    blocks: Iterable[tuple[np.ndarray, np.ndarray]],
+    blocks: Iterable[tuple[np.ndarray, np.ndarray, np.ndarray]],
     mol: Union[gto.Mole, pbc_gto.Cell],
     mo_coeff: tuple[np.ndarray, np.ndarray],
     mo_occ: tuple[np.ndarray, np.ndarray],
-    rdm1: np.ndarray,
     weights: Optional[list[np.ndarray]],
     part_method: Optional[str],
     natm: int,
 ) -> XCPart:
     """
     this function partitions an xc energy, E = sum_r w(r) eps(r) rho(r), given
-    block-wise as ao values and weighted energy densities, into contributions from
-    individual atoms ("mo"/"ao") or orbitals (otherwise)
+    block-wise as ao values, weighted energy densities and c0 = ao . D, into
+    contributions from individual atoms ("mo"/"ao") or orbitals (otherwise)
     """
     spin_mos = dim(mo_occ)
     if part_method == "ao":
         # ao contributions: e_mu = sum_r w(r) eps(r) chi_mu(r) sum_nu D_munu chi_nu(r)
-        rdm1_sum = np.sum(rdm1, axis=0)
-        e_ao = np.zeros(rdm1_sum.shape[0], dtype=np.float64)
-        for ao0, weps in blocks:
-            e_ao += contract("p,pi,pi->i", weps, ao0, ao0 @ rdm1_sum)
+        # (sum_nu D_munu chi_nu(r) = c0, reused from the evaluation of rho)
+        e_ao = np.zeros(mol.nao_nr(), dtype=np.float64)
+        for ao0, weps, c0 in blocks:
+            e_ao += contract("p,pi,pi->i", weps, ao0, c0)
+            # free c0 before the next block is evaluated
+            del c0
         ao_atm = np.array([lbl[0] for lbl in mol.ao_labels(fmt=None)])
         return np.bincount(ao_atm, weights=e_ao, minlength=natm)
     # orbital contributions: e_m = sum_r w(r) eps(r) |phi_m(r)|^2
     e_orb = [np.zeros(spin_mo.size, dtype=np.float64) for spin_mo in spin_mos]
-    for ao0, weps in blocks:
+    for ao0, weps, c0 in blocks:
         for i, spin_mo in enumerate(spin_mos):
             e_orb[i] += weps @ (ao0 @ mo_coeff[i][:, spin_mo]) ** 2
+        # free c0 before the next block is evaluated
+        del c0
     if part_method == "mo":
         # atom contributions via orbital-to-atom occupation factors
         assert weights is not None
@@ -353,12 +364,12 @@ def _xc_energies(
     xc_type, ao_deriv = _xc_ao_deriv(mf.xc)
     e_xc = _xc_partition(
         _xc_blocks(mol, mf, rdm1, xc_type, ao_deriv),
-        mol, mo_coeff, mo_occ, rdm1, weights, part_method, natm,
+        mol, mo_coeff, mo_occ, weights, part_method, natm,
     )
     e_xc_nlc = None
     if not isinstance(mol, pbc_gto.Cell) and mf.do_nlc():
         e_xc_nlc = _xc_partition(
             _nlc_blocks(mol, mf, rdm1),
-            mol, mo_coeff, mo_occ, rdm1, weights, part_method, natm,
+            mol, mo_coeff, mo_occ, weights, part_method, natm,
         )
     return e_xc, e_xc_nlc
