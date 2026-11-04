@@ -527,18 +527,6 @@ def _pcm(
     return vmat_e, nuc_solv_pcm
 
 
-def _trace(
-    op: np.ndarray, rdm1: np.ndarray, scaling: float = 1.0
-) -> Union[float, np.ndarray]:
-    """
-    this function returns the trace between an operator and an rdm1
-    """
-    if op.ndim == 2:
-        return contract("ij,ij", op, rdm1) * scaling
-    else:
-        return contract("xij,ij->x", op, rdm1) * scaling
-
-
 def _mo_diag(op: np.ndarray, c: np.ndarray) -> np.ndarray:
     """
     this function returns c_m^T op c_m for all columns c_m of c

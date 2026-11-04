@@ -7,14 +7,14 @@ properties module
 
 import copy
 import numpy as np
-from pyscf import gto, scf, dft, lo, lib
+from pyscf import gto, scf, dft, lo
 from pyscf.pbc import dft as pbc_dft
 from pyscf.pbc import gto as pbc_gto
 from pyscf.pbc import scf as pbc_scf
 from typing import Union, Optional
 
 from .pbctools import ewald_e_nuc
-from .tools import dim, make_rdm1, orbsym, contract
+from .tools import dim, make_rdm1, orbsym
 from .decomp import CompKeys
 from .prop_tools import (
     _h_core,
@@ -24,9 +24,6 @@ from .prop_tools import (
     _xc_energies,
     _orb_atom_occ,
     _solvent,
-    _point_charges,
-    _pcm,
-    _trace,
     _mo_diag,
 )
 
@@ -295,7 +292,7 @@ def prop_tot(
         def tr_orb(op: np.ndarray, per_spin: bool = False) -> list[np.ndarray]:
             """
             this function returns tr(op d_m) for all occupied spin-orbitals m, per spin
-            # (op[i] is the operator of spin i)
+            (op[i] is the operator of spin i)
             """
             if restrict and not per_spin:
                 o = occ[0] * _mo_diag(op, c[0])

@@ -15,7 +15,6 @@ from decodense.prop_tools import (
     _mo_diag,
     _orb_atom_occ,
     _solvent,
-    _trace,
     _vk_dft,
     _xc_blocks,
     _xc_energies,
@@ -169,36 +168,6 @@ def test_make_rho_atom_slicing():
         select = np.where(ao_atom_idx == atom_idx)[0]
         rho_sum += _make_rho_interm2(c0[:, select], None, ao_value[:, select], "LDA")
     assert np.allclose(rho_sum, rho_total, atol=1e-10)
-
-
-# _trace
-# computed trace must match hand-derived value
-def test_trace_identity():
-    op = np.array([[1.0, 2.0], [3.0, 4.0]])
-    rdm1 = np.eye(2)
-    assert _trace(op, rdm1) == 5.0
-    assert _trace(op, rdm1, scaling=0.5) == 2.5
-
-
-# computed trace must match numpy's reference value for a symmetric rdm1
-def test_trace_symmetric():
-    op = np.array([[1.0, 2.0], [3.0, 4.0]])
-    rdm1 = np.array([[2.0, 1.0], [1.0, 3.0]])
-    assert _trace(op, rdm1) == np.trace(op @ rdm1)
-
-
-# computed trace of a 3d operator must match hand-derived value
-def test_trace_3d():
-    op = np.array(
-        [
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[0.0, 1.0], [1.0, 0.0]],
-            [[1.0, 0.0], [0.0, 1.0]],
-        ]
-    )
-    rdm1 = np.array([[2.0, 1.0], [1.0, 3.0]])
-    assert np.array_equal(_trace(op, rdm1), [19.0, 2.0, 5.0])
-    assert np.array_equal(_trace(op, rdm1, scaling=0.5), [9.5, 1.0, 2.5])
 
 
 # _mo_diag
