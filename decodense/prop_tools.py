@@ -609,6 +609,10 @@ def _e_dft_x(
     """
     this function returns the atom contributions to the exact exchange included in
     the DFT XC energy
+    two possible routes:
+    1) rdm1_from_mos=True: the full-range part is taken from the atom-atom exchange matrix that was calculated in _e_jk_atoms;
+    2) rdm1_from_mos=False: the full-range part is built here from the provided rdm1, or taken from mf.vk if present.
+    the long-range part of range-separated functionals is always built here.
     """
     rdm1_jk = np.sum(rdm1, axis=0) if restrict else rdm1
 

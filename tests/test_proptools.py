@@ -7,6 +7,8 @@ from unittest.mock import patch
 from decodense.prop_tools import (
     _ao_val,
     _dip_nuc,
+    _e_dft_x,
+    _e_jk_atoms,
     _e_nuc_pairs,
     _v_nuc_atoms,
     _h_core,
@@ -211,6 +213,76 @@ def test_tr_atom():
     assert np.allclose(_tr_atom(op[0], c, F, False), ref[0, 0] + ref[1, 0])
     # restricted: identical spins -> twice the alpha contribution
     assert np.allclose(_tr_atom(op, [c[0], c[0]], [F[0], F[0]], True), 2.0 * ref[0])
+
+
+# helper: hf mos of h2o (restricted) or h2o+ (unrestricted), and orbital-to-atom
+# occupation factors from random weights (identical for both spins if restricted)
+def _h2o_c_F(restrict):
+    if restrict:
+        mol = gto.M(verbose=0, output=None, basis="sto-3g", atom="geom/h2o.xyz")
+        mf = scf.RHF(mol).run()
+        mo_coeff, mo_occ = (mf.mo_coeff, mf.mo_coeff), (mf.mo_occ / 2, mf.mo_occ / 2)
+    else:
+        mol = gto.M(
+            verbose=0, output=None, basis="sto-3g", atom="geom/h2o.xyz", charge=1, spin=1
+        )
+        mf = scf.UHF(mol).run()
+        mo_coeff, mo_occ = tuple(mf.mo_coeff), tuple(mf.mo_occ)
+    spin_mos = tuple(np.where(o > 0)[0] for o in mo_occ)
+    c = [mo_coeff[s][:, spin_mos[s]] for s in range(2)]
+    rng = np.random.default_rng(7)
+    weights = [rng.random((spin_mo.size, mol.natm)) for spin_mo in spin_mos]
+    if restrict:
+        weights[1] = weights[0]
+    F = _orb_atom_occ(mo_occ, weights, spin_mos, mol.natm)
+    return mol, mf, c, F
+
+
+# _e_jk_atoms
+# atom-atom coulomb and exchange matrices must match an explicit calculation with the
+# atom-specific 1-RDMs d_K,s,
+# and must sum to the coulomb and exchange energies of the total density,
+# for restricted and unrestricted references and for several batch sizes
+# (natm = 3: batches of 1, 2 + 1 and 3 atoms)
+@pytest.mark.parametrize("blksize", [1, 2, 16])
+@pytest.mark.parametrize("restrict", [True, False])
+def test_e_jk_atoms(restrict, blksize):
+    mol, mf, c, F = _h2o_c_F(restrict)
+    natm, nao = mol.natm, mol.nao_nr()
+    coul, exch = _e_jk_atoms(mol, mf, c, F, restrict, blksize=blksize)
+    # explicit atom-specific 1-RDMs, shape (2, natm, nao, nao)
+    d = np.array([[make_rdm1(c[s], F[s][:, k]) for k in range(natm)] for s in range(2)])
+    vj, vk = scf.hf.get_jk(mol, d.reshape(-1, nao, nao))
+    vj, vk = vj.reshape(2, natm, nao, nao), vk.reshape(2, natm, nao, nao)
+    coul_ref = 0.5 * np.einsum("kij,lij->kl", vj[0] + vj[1], d[0] + d[1])
+    exch_ref = -0.5 * sum(np.einsum("kij,lij->kl", vk[s], d[s]) for s in range(2))
+    assert np.allclose(coul, coul_ref, atol=1e-10)
+    assert np.allclose(exch, exch_ref, atol=1e-10)
+    # total density: D_s = sum_K d_K,s
+    dm = d.sum(axis=1)
+    vj_tot, vk_tot = scf.hf.get_jk(mol, dm)
+    assert np.isclose(coul.sum(), 0.5 * np.einsum("sij,tij->", vj_tot, dm), atol=1e-10)
+    assert np.isclose(exch.sum(), -0.5 * np.einsum("sij,sij->", vk_tot, dm), atol=1e-10)
+
+
+# _e_dft_x
+# both routes of _e_dft_x must give the same atom contributions (for pure, hybrid and
+# range-separated functionals, restricted and unrestricted references)
+# both are called with the same 1-RDM formed from the mos, for which the route with rdm1_from_mos=True is exact
+@pytest.mark.parametrize("xc", ["pbe", "pbe0", "camb3lyp"])
+@pytest.mark.parametrize("restrict", [True, False])
+def test_e_dft_x(restrict, xc):
+    mol, mf_hf, c, F = _h2o_c_F(restrict)
+    # no scf run needed: the identity D = sum_K d_K holds for any mos
+    mf = dft.RKS(mol, xc=xc) if restrict else dft.UKS(mol, xc=xc)
+    _, exch = _e_jk_atoms(mol, mf_hf, c, F, restrict)
+    # rows of F sum to the occupations -> 1-RDMs of the mos
+    rdm1 = np.array([make_rdm1(c[s], F[s].sum(axis=1)) for s in range(2)])
+    e_fast = _e_dft_x(mol, mf, rdm1, c, F, exch, restrict, True)
+    e_full = _e_dft_x(mol, mf, rdm1, c, F, exch, restrict, False)
+    assert np.allclose(e_fast, e_full, atol=1e-10)
+    if xc == "pbe":
+        assert np.allclose(e_fast, 0.0)
 
 
 # _orb_atom_occ
