@@ -14,7 +14,6 @@ from typing import Union, Optional
 
 from .decomp import DecompCls, sanity_check
 from .orbitals import assign_rdm1s
-from .properties import prop_tot
 from .tools import atom_ref_energies, write_rdm1, logger_config
 from .results import ResultsCls
 from .schemes import SCHEMES

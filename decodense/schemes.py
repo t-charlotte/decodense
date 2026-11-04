@@ -8,11 +8,10 @@ schemes module
 import numpy as np
 from pyscf.pbc import gto as pbc_gto
 
-from .aap_properties import aap_prop_tot, a2ap_redistribute
 from .bonds import bond_mbo
 from .decomp import CompKeys
 from .orbitals import assign_rdm1s
-from .properties import prop_tot
+from .properties import prop_tot, aap_prop_tot, a2ap_redistribute
 from .tools import write_rdm1, logger
 
 from typing import Optional
