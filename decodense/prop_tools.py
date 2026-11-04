@@ -533,3 +533,22 @@ def _mo_diag(op: np.ndarray, c: np.ndarray) -> np.ndarray:
     (op: (nao, nao) -> shape (nmo,), op: (ncomp, nao, nao) -> shape (ncomp, nmo))
     """
     return np.sum((op @ c) * c, axis=-2)
+
+
+def _tr_atom(
+    op: np.ndarray,
+    c: list[np.ndarray],
+    F: list[np.ndarray],
+    restrict: bool,
+    spin: Optional[int] = None,
+) -> np.ndarray:
+    """
+    this function returns tr(op d_K) for all atoms K, for one spin or summed over
+    spins, using tr(op d_K) = sum_m F[m,K] c_m^T op c_m (d_K is never formed)
+    (op: (nao, nao) -> shape (natm,), op: (ncomp, nao, nao) -> shape (ncomp, natm))
+    """
+    if spin is not None:
+        return _mo_diag(op, c[spin]) @ F[spin]
+    if restrict:
+        return _mo_diag(op, c[0]) @ (F[0] + F[1])
+    return _mo_diag(op, c[0]) @ F[0] + _mo_diag(op, c[1]) @ F[1]

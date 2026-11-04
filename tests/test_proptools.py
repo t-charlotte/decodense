@@ -15,10 +15,12 @@ from decodense.prop_tools import (
     _mo_diag,
     _orb_atom_occ,
     _solvent,
+    _tr_atom,
     _vk_dft,
     _xc_blocks,
     _xc_energies,
 )
+from decodense.tools import make_rdm1
 from pyscf import gto, scf, dft, qmmm
 from pyscf.dft import numint
 
@@ -180,6 +182,35 @@ def test_mo_diag():
     op3 = rng.random((3, 5, 5))
     ref = np.array([np.diag(c.T @ o @ c) for o in op3])
     assert np.allclose(_mo_diag(op3, c), ref)
+
+
+# _tr_atom
+# tr(op d_K) must match an explicit calculation with the atom-specific 1-RDMs
+# d_sK = sum_m F[s][m,K] |c_sm><c_sm|: for one spin, summed over spins (unrestricted
+# and restricted), and for single and multi-component operators
+def test_tr_atom():
+    rng = np.random.default_rng(6)
+    nao, natm = 5, 2
+    # different numbers of occupied mos per spin (3 alpha, 2 beta)
+    c = [rng.random((nao, 3)), rng.random((nao, 2))]
+    F = [rng.random((3, natm)), rng.random((2, natm))]
+    op = rng.random((3, nao, nao))
+    # explicit atom-specific 1-RDMs and traces, shape (nspin, ncomp, natm)
+    d = [[make_rdm1(c[s], F[s][:, k]) for k in range(natm)] for s in range(2)]
+    ref = np.array(
+        [
+            [[np.einsum("ij,ij", o, d[s][k]) for k in range(natm)] for o in op]
+            for s in range(2)
+        ]
+    )
+    # one spin, and summed over spins (unrestricted), multi-component operator
+    for s in range(2):
+        assert np.allclose(_tr_atom(op, c, F, False, spin=s), ref[s])
+    assert np.allclose(_tr_atom(op, c, F, False), ref[0] + ref[1])
+    # single (nao, nao) operator
+    assert np.allclose(_tr_atom(op[0], c, F, False), ref[0, 0] + ref[1, 0])
+    # restricted: identical spins -> twice the alpha contribution
+    assert np.allclose(_tr_atom(op, [c[0], c[0]], [F[0], F[0]], True), 2.0 * ref[0])
 
 
 # _orb_atom_occ

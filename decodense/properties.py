@@ -25,30 +25,8 @@ from .prop_tools import (
     _orb_atom_occ,
     _solvent,
     _mo_diag,
+    _tr_atom,
 )
-
-
-def atom_ref_energies(
-    mol: Union[gto.Mole, pbc_gto.Cell],
-    atom_ref: dict,
-) -> np.ndarray:
-    """
-    this function returns an array with the atomic reference energies
-    taken from the provided atom_ref dictionary
-    and ordered according to the atom order in the provided mol object
-    """
-
-    e_ref = np.zeros(mol.natm, dtype=np.float64)
-    for i in range(mol.natm):
-        a_symbol = mol.atom_symbol(i)
-        try:
-            e_ref[i] = atom_ref[a_symbol]
-        except KeyError as err:
-            raise KeyError(
-                f"atomic reference energy for atom {i} with symbol {a_symbol} not found in the provided atom_ref dictionary"
-            ) from err
-
-    return e_ref
 
 
 def prop_tot(
@@ -217,14 +195,10 @@ def prop_tot(
 
         def tr_atom(op: np.ndarray, spin: Optional[int] = None) -> np.ndarray:
             """
-            this function returns tr(op d_K) for all atom K,
+            this function returns tr(op d_K) for all atoms K,
             for one spin or summed over spins
             """
-            if spin is not None:
-                return _mo_diag(op, c[spin]) @ F[spin]
-            if restrict:
-                return _mo_diag(op, c[0]) @ (F[0] + F[1])
-            return _mo_diag(op, c[0]) @ F[0] + _mo_diag(op, c[1]) @ F[1]
+            return _tr_atom(op, c, F, restrict, spin)
 
         # init results
         res: dict[str, np.ndarray] = {}
