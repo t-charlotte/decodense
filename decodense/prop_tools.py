@@ -94,22 +94,6 @@ def _v_nuc_atoms(mol: gto.Mole) -> Iterator[np.ndarray]:
         yield sub_nuc
 
 
-def _xc_ao_deriv(xc_func: str) -> tuple[str, int]:
-    """
-    this function returns the type of xc functional and the required level of ao derivatives
-    """
-    xc_type = dft.libxc.xc_type(xc_func)
-    if xc_type in ("LDA", "HF"):
-        ao_deriv = 0
-    elif xc_type in ("GGA", "NLC"):
-        ao_deriv = 1
-    elif xc_type == "MGGA":
-        ao_deriv = 2
-    else:
-        raise NotImplementedError(f"xc functional type {xc_type} not supported")
-    return xc_type, ao_deriv
-
-
 def _make_rho_interm1(
     ao_value: np.ndarray, rdm1: np.ndarray, xc_type: str
 ) -> tuple[np.ndarray, Optional[np.ndarray]]:
@@ -390,7 +374,16 @@ def _xc_energies(
     this function returns the "pure" xc and nlc (vv10) energies (None if no nlc) from
     individual atoms ("mo"/"ao") or orbitals (otherwise)
     """
-    xc_type, ao_deriv = _xc_ao_deriv(mf.xc)
+    # type of xc functional and level of ao derivatives needed
+    xc_type = dft.libxc.xc_type(mf.xc)
+    if xc_type in ("LDA", "HF"):
+        ao_deriv = 0
+    elif xc_type in ("GGA", "NLC"):
+        ao_deriv = 1
+    elif xc_type == "MGGA":
+        ao_deriv = 2
+    else:
+        raise NotImplementedError(f"xc functional type {xc_type} not supported")
     e_xc = _xc_partition(
         _xc_blocks(mol, mf, rdm1, xc_type, ao_deriv),
         mol,

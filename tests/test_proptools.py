@@ -17,7 +17,6 @@ from decodense.prop_tools import (
     _solvent,
     _trace,
     _vk_dft,
-    _xc_ao_deriv,
     _xc_blocks,
     _xc_energies,
 )
@@ -120,8 +119,8 @@ def test_h_core(mf_h2o_rhf):
 
 
 # _v_nuc_atoms
-# individual atomic potentials must match an explicit calculation and sum to pyscf's
-# total nuclear potential
+# individual atomic potentials must match an explicit calculation
+# and they must sum to pyscf's total nuclear potential
 def test_v_nuc_atoms():
     mol = gto.M(atom="Li 0 0 0; H 0 0 1.0", basis="sto-3g", unit="bohr", verbose=0)
     v_nuc = list(_v_nuc_atoms(mol))
@@ -131,28 +130,6 @@ def test_v_nuc_atoms():
         with mol.with_rinv_origin(mol.atom_coords()[k]):
             v_k = -mol.atom_charges()[k] * mol.intor("int1e_rinv")
         assert np.allclose(v_nuc[k], v_k, atol=1e-10)
-
-
-# _xc_ao_deriv
-# each functional must give the correct xc type and ao derivative level
-@pytest.mark.parametrize(
-    "xc_func,expected",
-    [
-        ("lda,vwn", ("LDA", 0)),
-        ("hf", ("HF", 0)),
-        ("pbe", ("GGA", 1)),
-        ("tpss", ("MGGA", 2)),
-    ],
-)
-def test_xc_ao_deriv(xc_func, expected):
-    assert _xc_ao_deriv(xc_func) == expected
-
-
-# unrecognised xc_type must raise UnboundLocalError
-def test_xc_ao_deriv_unknown_type():
-    with patch("pyscf.dft.libxc.xc_type", return_value="UNKNOWN"):
-        with pytest.raises(NotImplementedError):
-            _xc_ao_deriv("anything")
 
 
 # _make_rho
@@ -333,15 +310,20 @@ def test_xc_blocks_hf(mf_h2o_dft):
     assert list(_xc_blocks(mf_h2o_dft.mol, mf_h2o_dft, rdm1, "HF", 0)) == []
 
 
-# _xc_energies (incl. _xc_blocks and _xc_partition)
-# atom- and orbital-wise xc energies must sum to pyscf's total xc energy
+# _xc_energies (incl. the xc type and ao derivative selection, _xc_blocks and _xc_partition)
+# atom- and orbital-wise xc energies must sum to pyscf's total xc energy for all
+# supported functional types (lda, gga, hybrid gga, meta-gga); hf must give zero
+@pytest.mark.parametrize("xc", ["lda,vwn", "pbe", "pbe0", "tpss", "hf"])
 @pytest.mark.parametrize("part_method", ["mo", "ao", None])
-def test_xc_energies_sum(mf_h2o_dft, part_method):
-    mf = mf_h2o_dft
-    mol = mf.mol
-    occ = np.where(mf.mo_occ > 0)[0]
-    c = mf.mo_coeff[:, occ]
-    dm = mf.make_rdm1()
+def test_xc_energies_sum(mf_h2o_dft, xc, part_method):
+    mol = mf_h2o_dft.mol
+    mf = dft.RKS(mol, xc=xc)
+    # any density works for the sum rule;
+    # use the converged pbe0 density of the mf_h2o_dft fixture
+    # (no scf run with each functional needed)
+    occ = np.where(mf_h2o_dft.mo_occ > 0)[0]
+    c = mf_h2o_dft.mo_coeff[:, occ]
+    dm = mf_h2o_dft.make_rdm1()
     rng = np.random.default_rng(3)
     w = rng.random((occ.size, mol.natm))
     e_xc, e_xc_nlc = _xc_energies(
@@ -354,9 +336,22 @@ def test_xc_energies_sum(mf_h2o_dft, part_method):
         part_method,
         mol.natm,
     )
-    exc_ref = mf._numint.nr_rks(mol, mf.grids, mf.xc, dm)[1]
-    assert np.isclose(np.sum(e_xc), exc_ref, atol=1e-8)
+    total = sum(np.sum(x) for x in e_xc) if isinstance(e_xc, list) else np.sum(e_xc)
+    if xc == "hf":
+        assert total == 0.0
+    else:
+        # grids were built inside _xc_energies
+        exc_ref = mf._numint.nr_rks(mol, mf.grids, mf.xc, dm)[1]
+        assert np.isclose(total, exc_ref, atol=1e-8)
     assert e_xc_nlc is None
+
+
+# an unsupported xc functional type must raise NotImplementedError
+# (raised before any other argument is used)
+def test_xc_energies_unknown_type(mf_h2o_dft):
+    with patch("pyscf.dft.libxc.xc_type", return_value="UNKNOWN"):
+        with pytest.raises(NotImplementedError):
+            _xc_energies(mf_h2o_dft.mol, mf_h2o_dft, None, None, None, None, "mo", 0)
 
 
 # _xc_energies, unrestricted (open-shell) reference
@@ -445,7 +440,9 @@ def test_xc_energies_nlc_sum(mf_h2o_dft, part_method):
     mf = dft.RKS(mol, xc="b97m_v")
     if not _has_new_nlc_interface(mf._numint, mf.xc):
         pytest.skip("installed pyscf lacks the nlc interface used by _nlc_blocks")
-    # any density works for the sum rule; use the pbe0 one of the fixture
+    # any density works for the sum rule;
+    # use the converged pbe0 density of the mf_h2o_dft fixture
+    # (no scf run with each functional needed)
     occ = np.where(mf_h2o_dft.mo_occ > 0)[0]
     c = mf_h2o_dft.mo_coeff[:, occ]
     dm = mf_h2o_dft.make_rdm1()
