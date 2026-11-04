@@ -14,7 +14,7 @@ from typing import Union, Any, Optional
 
 from .tools import dim, make_rdm1, contract
 from .decomp import CompKeys, PROP_KEYS
-from .prop_tools import _h_core, _vk_dft, _xc_energies, _orb_atom_occ
+from .prop_tools import _v_nuc_atoms, _vk_dft, _xc_energies, _orb_atom_occ
 
 # max. number of atom-RDM1s per batched get_jk call (lower it to save memory)
 JK_BLKSIZE = 16
@@ -36,7 +36,7 @@ def a2ap_redistribute(
        and (aap only) the energies of the bonded atom pairs are added
     3. (if atom_ref is given) the isolated-atom energies are redistributed in the
        same way and subtracted from the total energy, saved under CompKeys.tot_rel
-    only the keys in PROP_KEYS are redistributed, all other keys are discarded.
+    only the keys in PROP_KEYS (see decomp.py) are redistributed, all other keys are discarded.
     returns:
     - the bond-wise results
     note: assumes that the rows of a2ap_weights are normalized, in order to achieve a
@@ -152,8 +152,9 @@ def aap_prop_tot(
     # nuclear repulsion property
     prop_nuc_rep = _e_nuc_ap(pmol)
 
-    # core hamiltonian
-    kin, nuc, sub_nuc = _h_core(mol, mf)
+    # kinetic integrals and individual atomic potentials (interim, replaced in step 6)
+    kin = mol.intor_symmetric("int1e_kin")
+    sub_nuc = np.array(list(_v_nuc_atoms(mol)))
 
     # no solvent contributions (yet) -> NYI
 
@@ -195,6 +196,12 @@ def aap_prop_tot(
     zeros_ap = np.zeros(npairs, dtype=np.float64)
 
     def _a_ap(mat: np.ndarray) -> np.ndarray:
+        """
+        this function takes an atom-atom energy matrix mat (mat[a,b]: interaction
+        of the electron cloud of atom a, or for nuc_att its nucleus, with the electron
+        cloud of atom b) and returns the atom contributions mat[a,a] followed by the
+        atom-pair contributions mat[a,b] + mat[b,a] (a < b)
+        """
         return np.concatenate((np.diag(mat), mat[iu0, iu1] + mat[iu1, iu0]))
 
     prop = {
@@ -261,7 +268,7 @@ def aap_prop_tot(
 
 def _e_nuc_ap(mol: gto.Mole) -> np.ndarray:
     """
-    CHRT: function that returns the nuclear repulsion energy per atom pair
+    this function returns the nuclear repulsion energy per atom pair
     """
     # coordinates and charges of nuclei
     charges = mol.atom_charges()

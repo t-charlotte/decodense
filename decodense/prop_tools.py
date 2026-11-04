@@ -29,9 +29,8 @@ def _h_core(
     rdm1: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    this function returns the kinetic and total nuclear attraction operators, and the
-    nuclear attraction energies tr(V_K D) of the individual atomic potentials V_K
-    (rdm1: spin-summed 1-RDM)
+    this function returns the kinetic and total nuclear attraction operators,
+    and the nuclear attraction energies of the individual atomic potentials
     """
     if not isinstance(mol, pbc_gto.Cell) and mol.has_ecp():
         raise NotImplementedError("Decodense does not support ECP")
@@ -49,21 +48,25 @@ def _h_core(
     else:
         # kinetic integrals
         kin = mol.intor_symmetric("int1e_kin")
-        # total nuclear potential and individual nuclear attraction energies
-        nuc, e_nuc = _get_nuc(mol, rdm1)
+        # total nuclear potential and nuclear attraction energies
+        nuc = np.zeros_like(kin)
+        e_nuc = np.zeros(mol.natm, dtype=np.float64)
+        for k, sub_nuc in enumerate(_v_nuc_atoms(mol)):
+            nuc += sub_nuc
+            e_nuc[k] = np.einsum("ij,ij", sub_nuc, rdm1)
     return kin, nuc, e_nuc
 
 
-def _e_nuc(mol: gto.Mole) -> np.ndarray:
+def _e_nuc_pairs(mol: gto.Mole) -> np.ndarray:
     """
-    this function returns the nuclear repulsion energy
+    this function returns the nuclear repulsion energies of all atom pairs
     """
     # coordinates and charges of nuclei
     charges = mol.atom_charges()
     # internuclear distances (with self-repulsion removed)
     dist = gto.inter_distance(mol)
     dist[np.diag_indices_from(dist)] = 1e200
-    return contract("i,ij,j->i", charges, 1.0 / dist, charges) * 0.5
+    return contract("i,ij,j->ij", charges, 1.0 / dist, charges)
 
 
 def _dip_nuc(mol: gto.Mole, gauge_origin: np.ndarray) -> np.ndarray:
@@ -76,30 +79,24 @@ def _dip_nuc(mol: gto.Mole, gauge_origin: np.ndarray) -> np.ndarray:
     return contract("i,ix->ix", form_charges, coords - gauge_origin)
 
 
-def _get_nuc(mol: gto.Mole, rdm1: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _v_nuc_atoms(mol: gto.Mole) -> Iterator[np.ndarray]:
     """
-    total nuclear potential and nuclear attraction energies tr(V_K D) of the
-    individual atomic potentials V_K for molecules (V_K is only stored for one atom
-    at a time)
+    this function yields the individual atomic potentials of a molecule,
+    one atom at a time
     """
     # coordinates and charges of nuclei
     coords = mol.atom_coords()
     charges = mol.atom_charges()
-    # sum of and traces with individual atomic potentials
-    nuc = np.zeros((mol.nao_nr(), mol.nao_nr()), dtype=np.float64)
-    e_nuc = np.zeros(mol.natm, dtype=np.float64)
     for k in range(mol.natm):
         with mol.with_rinv_origin(coords[k]):
             sub_nuc = -1.0 * charges[k] * mol.intor_symmetric("int1e_rinv")
-        nuc += sub_nuc
-        e_nuc[k] = np.einsum("ij,ij", sub_nuc, rdm1)
-    return nuc, e_nuc
+        # yielded outside the context manager, so the rinv origin is restored
+        yield sub_nuc
 
 
 def _xc_ao_deriv(xc_func: str) -> tuple[str, int]:
     """
-    this function returns the type of xc functional and the level of ao derivatives
-    needed
+    this function returns the type of xc functional and the required level of ao derivatives
     """
     xc_type = dft.libxc.xc_type(xc_func)
     if xc_type in ("LDA", "HF"):
@@ -253,8 +250,7 @@ def _orb_atom_occ(
     natm: int,
 ) -> list[np.ndarray]:
     """
-    this function returns the orbital-to-atom occupation factors F[i] - shape
-    (nocc_i, natm) - such that rdm1_atom[i,a] = sum_m F[i][m,a] |c_m><c_m|
+    this function returns the orbital-to-atom occupation factors
     """
     F = []
     for i, spin_mo in enumerate(spin_mos):
@@ -274,10 +270,11 @@ def _xc_blocks(
     ao_deriv: int,
 ) -> Iterator[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
-    this function yields ao values (without derivatives), weighted xc energy
-    densities, w(r) eps_xc(r), and the rho intermediate c0 = ao . D (D summed over
-    spins), block-wise on the dft grid (for molecules, ao values are never stored for
-    the full grid)
+    this function yields the following quantities block-wise on the dft grid:
+    - ao values (without derivatives)
+    - weighted xc energy densities
+    - w(r) * eps_xc(r)
+    - the rho intermediate c0 = ao . D
     """
     if xc_type == "HF":
         return
@@ -313,9 +310,11 @@ def _nlc_blocks(
     mol: gto.Mole, mf: dft.rks.KohnShamDFT, rdm1: np.ndarray
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
-    this function returns ao values (without derivatives), weighted nlc (vv10)
-    energy densities, w(r) eps_nlc(r), and the rho intermediate c0 = ao . D on the nlc
-    grid
+    this function returns the following quantities on the nlc grid:
+    - ao values (without derivatives)
+    - weighted nlc (vv10) energy densities
+    - w(r) * eps_nlc(r)
+    - the rho intermediate c0 = ao . C
     (adapted from: rks.get_veff and numint.nr_nlc_vxc in PySCF)
     """
     if mf.nlcgrids.coords is None or mf.nlcgrids.weights is None:
@@ -345,9 +344,7 @@ def _xc_partition(
     natm: int,
 ) -> XCPart:
     """
-    this function partitions an xc energy, E = sum_r w(r) eps(r) rho(r), given
-    block-wise as ao values, weighted energy densities and c0 = ao . D, into
-    contributions from individual atoms ("mo"/"ao") or orbitals (otherwise)
+    this function takes block-wise quantities and returns atom- or orbital-wise xc energies
     """
     spin_mos = dim(mo_occ)
     if part_method == "ao":
@@ -472,7 +469,8 @@ def _solvent(
 def _point_charges(mol: gto.Mole, mm_mol: gto.Mole) -> tuple[np.ndarray, np.ndarray]:
     """
     this function returns the full mm potential and the nuclei interaction with the
-    point charges (adapted from: qmmm/itrf.py:get_hcore() in PySCF)
+    point charges
+    (adapted from: qmmm/itrf.py:get_hcore() in PySCF)
     """
     # settings
     coords = mm_mol.atom_coords()
@@ -506,7 +504,8 @@ def _pcm(
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     this function returns the pcm potential matrix and the nuclei interaction with the
-    solvent (adapted from: solvent/pcm.py:_get_vind() in PySCF)
+    solvent
+    (adapted from: solvent/pcm.py:_get_vind() in PySCF)
     """
     surface = solvent_model.surface
     nao = mol.nao_nr()

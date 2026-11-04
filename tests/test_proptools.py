@@ -7,8 +7,8 @@ from unittest.mock import patch
 from decodense.prop_tools import (
     _ao_val,
     _dip_nuc,
-    _e_nuc,
-    _get_nuc,
+    _e_nuc_pairs,
+    _v_nuc_atoms,
     _h_core,
     _make_rho,
     _make_rho_interm2,
@@ -49,23 +49,26 @@ class MockMolNuc:
         return self._coords
 
 
-# _e_nuc
-# nuclear repulsion energy must match hand-derived value
-def test_e_nuc():
+# _e_nuc_pairs
+# pair matrix must be symmetric with zero diagonal and match hand-derived values,
+# and half its row sums must match the hand-derived per-atom values
+def test_e_nuc_pairs():
     mol = MockMolNuc(
         charges=[2.0, 1.0, 3.0],
         coords=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
     )
-    e_nuc = _e_nuc(mol)
-    assert np.allclose(e_nuc, [2.5, 1.67082039, 2.17082039])
+    e_nuc_pairs = _e_nuc_pairs(mol)
+    assert np.allclose(e_nuc_pairs, e_nuc_pairs.T)
+    assert np.allclose(np.diag(e_nuc_pairs), 0.0)
+    assert np.allclose(e_nuc_pairs[np.triu_indices(3, k=1)], [2.0, 3.0, 1.34164079])
+    assert np.allclose(0.5 * e_nuc_pairs.sum(axis=1), [2.5, 1.67082039, 2.17082039])
 
 
-# per-atom nuclear repulsion energy must sum to pyscf's reference value
-def test_e_nuc_pyscf(mf_h2o_rhf):
+# atom-pair nuclear repulsion energies must sum to pyscf's reference value
+def test_e_nuc_pairs_pyscf(mf_h2o_rhf):
     mol = mf_h2o_rhf.mol
-    nuc_energy = _e_nuc(mol).sum()
-    expected_nuc_energy = mol.energy_nuc()
-    assert np.isclose(nuc_energy, expected_nuc_energy, atol=1e-10)
+    nuc_energy = 0.5 * _e_nuc_pairs(mol).sum()
+    assert np.isclose(nuc_energy, mol.energy_nuc(), atol=1e-10)
 
 
 # _dip_nuc
@@ -111,25 +114,23 @@ def test_h_core(mf_h2o_rhf):
     assert e_nuc.shape == (mol.natm,)
     assert np.all(e_nuc < 0.0)
     assert np.isclose(e_nuc.sum(), np.einsum("ij,ij", nuc, rdm1), atol=1e-10)
+    assert np.allclose(
+        e_nuc, [np.einsum("ij,ij", v, rdm1) for v in _v_nuc_atoms(mol)], atol=1e-10
+    )
 
 
-# _get_nuc
-# individual atomic potentials must sum to pyscf's total nuclear potential
-# and per-atom energies tr(V_K D) must match an explicit calculation
-def test_get_nuc_matches_pyscf():
+# _v_nuc_atoms
+# individual atomic potentials must match an explicit calculation and sum to pyscf's
+# total nuclear potential
+def test_v_nuc_atoms():
     mol = gto.M(atom="Li 0 0 0; H 0 0 1.0", basis="sto-3g", unit="bohr", verbose=0)
-    nao = mol.nao_nr()
-    rng = np.random.default_rng(0)
-    # test should succeed with any random symmetric matrx
-    rdm1 = rng.random((nao, nao))
-    rdm1 = rdm1 + rdm1.T
-    nuc, e_nuc = _get_nuc(mol, rdm1)
-    assert np.allclose(nuc, mol.intor("int1e_nuc"), atol=1e-10)
-    assert e_nuc.shape == (mol.natm,)
+    v_nuc = list(_v_nuc_atoms(mol))
+    assert len(v_nuc) == mol.natm
+    assert np.allclose(sum(v_nuc), mol.intor("int1e_nuc"), atol=1e-10)
     for k in range(mol.natm):
         with mol.with_rinv_origin(mol.atom_coords()[k]):
             v_k = -mol.atom_charges()[k] * mol.intor("int1e_rinv")
-        assert np.isclose(e_nuc[k], np.einsum("ij,ij", v_k, rdm1), atol=1e-10)
+        assert np.allclose(v_nuc[k], v_k, atol=1e-10)
 
 
 # _xc_ao_deriv

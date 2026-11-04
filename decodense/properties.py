@@ -18,7 +18,7 @@ from .tools import dim, make_rdm1, orbsym, contract
 from .decomp import CompKeys
 from .prop_tools import (
     _h_core,
-    _e_nuc,
+    _e_nuc_pairs,
     _dip_nuc,
     _vk_dft,
     _xc_energies,
@@ -134,7 +134,7 @@ def prop_tot(
         if isinstance(mol, pbc_gto.Cell):
             prop_nuc_rep = ewald_e_nuc(mol)
         else:
-            prop_nuc_rep = _e_nuc(pmol)
+            prop_nuc_rep = 0.5 * np.sum(_e_nuc_pairs(pmol), axis=1)
     elif prop_type == "dipole":
         prop_nuc_rep = _dip_nuc(pmol, gauge_origin)
 
@@ -212,15 +212,17 @@ def prop_tot(
 
     def prop_atom_mo() -> dict[str, np.ndarray]:
         """
-        this function returns MO-based atom-wise energy/dipole contributions of all
-        atoms, using tr(O d_K) = sum_m F[m,K] c_m^T O c_m (d_K is never formed)
+        this function returns MO-based atom-wise energy/dipole contributions
         """
         # orbital-to-atom occupation factors and occupied mo coefficients
         F = _orb_atom_occ(mo_occ, weights, (alpha, beta), natm)
         c = [mo_coeff[i][:, spin_mo] for i, spin_mo in enumerate((alpha, beta))]
 
         def tr_atom(op: np.ndarray, spin: Optional[int] = None) -> np.ndarray:
-            # tr(op d_K) for all atoms K, for one spin or summed over spins
+            """
+            this function returns tr(op d_K) for all atom K,
+            for one spin or summed over spins
+            """
             if spin is not None:
                 return _mo_diag(op, c[spin]) @ F[spin]
             if restrict:
@@ -249,8 +251,7 @@ def prop_tot(
     def prop_atom_ao() -> dict[str, np.ndarray]:
         """
         this function returns AO-based atom-wise (EDA - energy density analysis)
-        energy/dipole contributions of all atoms, using
-        sum_{mu in K} sum_nu O_munu D_munu
+        energy/dipole contributions
         """
 
         def tr_atom(op: np.ndarray, dm: np.ndarray) -> np.ndarray:
@@ -284,16 +285,18 @@ def prop_tot(
     def prop_orb() -> dict[str, list[np.ndarray]]:
         """
         this function returns orbital-wise energy/dipole contributions of all occupied
-        spin-orbitals, using tr(O d_m) = n_m c_m^T O c_m (d_m is never formed)
+        spin-orbitals
         """
-        # occupied mo coefficients and occupations (ordered by position within the
-        # spin channel, which is relevant for non-aufbau occupation)
+        # occupied mo coefficients and occupations
+        # ordered by position within the spin channel
         c = [mo_coeff[i][:, spin_mo] for i, spin_mo in enumerate((alpha, beta))]
         occ = [mo_occ[i][spin_mo] for i, spin_mo in enumerate((alpha, beta))]
 
         def tr_orb(op: np.ndarray, per_spin: bool = False) -> list[np.ndarray]:
-            # tr(op D_m) for all occupied spin-orbitals m, per spin
-            # (per_spin: op[i] is the operator of spin i)
+            """
+            this function returns tr(op d_m) for all occupied spin-orbitals m, per spin
+            # (op[i] is the operator of spin i)
+            """
             if restrict and not per_spin:
                 o = occ[0] * _mo_diag(op, c[0])
                 return [o, o.copy()]
