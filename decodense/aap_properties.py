@@ -5,19 +5,23 @@
 aap_properties module
 """
 
-import copy
 import numpy as np
-from pyscf import gto, scf, dft, df, lo, lib, solvent
+from pyscf import gto, scf, dft, lo
 from pyscf.pbc import dft as pbc_dft
 from pyscf.pbc import scf as pbc_scf
-from typing import Union, Any, Optional
+from typing import Union, Optional
 
-from .tools import dim, make_rdm1, contract
+from .tools import dim, make_rdm1
 from .decomp import CompKeys, PROP_KEYS
-from .prop_tools import _v_nuc_atoms, _vk_dft, _xc_energies, _orb_atom_occ
-
-# max. number of atom-RDM1s per batched get_jk call (lower it to save memory)
-JK_BLKSIZE = 16
+from .prop_tools import (
+    _e_nuc_pairs,
+    _v_nuc_atoms,
+    _xc_energies,
+    _orb_atom_occ,
+    _tr_atom,
+    _e_jk_atoms,
+    _e_dft_x,
+)
 
 
 def a2ap_redistribute(
@@ -126,14 +130,14 @@ def aap_prop_tot(
     # dft logical
     dft_calc = isinstance(mf, dft.rks.KohnShamDFT)
 
-    # ao dipole integrals with specified gauge origin -> NYI
-    ao_dip = None
-
-    # compute total 1-RDMs (AO basis)
+    # compute total 1-RDMs (AO basis), identical for both spins if restricted
+    rdm1_from_mos = rdm1 is None
     if rdm1 is None:
+        rdm1_a = make_rdm1(mo_coeff[0], mo_occ[0])
         rdm1 = np.array(
-            [make_rdm1(mo_coeff[0], mo_occ[0]), make_rdm1(mo_coeff[1], mo_occ[1])]
+            [rdm1_a, rdm1_a if restrict else make_rdm1(mo_coeff[1], mo_occ[1])]
         )
+        del rdm1_a
     if rdm1.ndim == 2:
         rdm1 = np.array([rdm1, rdm1]) * 0.5
 
@@ -144,67 +148,50 @@ def aap_prop_tot(
         pmol = mol
 
     # molecular dimensions
-    alpha, beta = dim(mo_occ)
-
     natm = pmol.natm
-    npairs = int(natm * (natm - 1) / 2)
+    npairs = natm * (natm - 1) // 2
+    iu0, iu1 = np.triu_indices(natm, k=1)
 
     # nuclear repulsion property
-    prop_nuc_rep = _e_nuc_ap(pmol)
+    prop_nuc_rep = _e_nuc_pairs(pmol)[iu0, iu1]
 
-    # kinetic integrals and individual atomic potentials (interim, replaced in step 6)
-    kin = mol.intor_symmetric("int1e_kin")
-    sub_nuc = np.array(list(_v_nuc_atoms(mol)))
+    # orbital-to-atom occupation factors and occupied mo coefficients
+    spin_mos = dim(mo_occ)
+    F = _orb_atom_occ(mo_occ, weights, spin_mos, natm)
+    c = [mo_coeff[i][:, spin_mo] for i, spin_mo in enumerate(spin_mos)]
 
     # no solvent contributions (yet) -> NYI
 
+    # atom-wise kinetic energies and atom-atom energy matrices
+    e_kin = _tr_atom(mol.intor_symmetric("int1e_kin"), c, F, restrict)
+    nuc_att = np.array([_tr_atom(v, c, F, restrict) for v in _v_nuc_atoms(mol)])
+    coul, exch = _e_jk_atoms(mol, mf, c, F, restrict)
+
     # xc energies of individual atoms
     if dft_calc:
-        # update exchange operator wrt range-separated parameter and exact exchange
-        # components
-        vk = _vk_dft(
-            mol,
-            mf,
-            mf.xc,
-            np.sum(rdm1, axis=0) if restrict else rdm1,
-            copy.copy(mf.vk) if hasattr(mf, "vk") else None,
-        )
         # "pure" xc energy and its nlc part (vv10)
         e_xc, e_xc_nlc = _xc_energies(
             mol, mf, mo_coeff, mo_occ, rdm1, weights, "mo", natm
         )
         if e_xc_nlc is None:
             e_xc_nlc = np.zeros(natm, dtype=np.float64)
+        # exact exchange included in the DFT XC energy
+        e_dft_x = _e_dft_x(mol, mf, rdm1, c, F, exch, restrict, rdm1_from_mos)
     # end if dft_calc
 
-    # perform decomposition
-    prop: dict[str, Union[np.ndarray, list[np.ndarray]]]
-
-    spin_mos = (alpha, beta)
-
-    # atom-specific 1-RDMs
-    rdm1_atom = _atom_rdm1(mo_coeff, mo_occ, weights, spin_mos, natm)
-    rdm1_atom_tot = (rdm1_atom[0] + rdm1_atom[1]).reshape(natm, -1)
-
-    # atom-atom energy matrices
-    coul, exch = _e_jk_atoms(mol, mf, rdm1_atom, rdm1_atom_tot, restrict)
-    nuc_att = sub_nuc.reshape(natm, -1) @ rdm1_atom_tot.T
-    e_kin = rdm1_atom_tot @ kin.ravel()
-
-    # atom (diagonal) and atom-pair (off-diagonal) contributions,
-    iu0, iu1 = np.triu_indices(natm, k=1)
+    # atom (diagonal) and atom-pair (off-diagonal) contributions
     zeros_ap = np.zeros(npairs, dtype=np.float64)
 
     def _a_ap(mat: np.ndarray) -> np.ndarray:
         """
-        this function takes an atom-atom energy matrix mat (mat[a,b]: interaction
-        of the electron cloud of atom a, or for nuc_att its nucleus, with the electron
-        cloud of atom b) and returns the atom contributions mat[a,a] followed by the
-        atom-pair contributions mat[a,b] + mat[b,a] (a < b)
+        this function takes an atom-atom energy matrix mat (mat[K,L]: interaction
+        of the electron cloud of atom K, or for nuc_att its nucleus, with the electron
+        cloud of atom L) and returns the atom contributions mat[K,K] followed by the
+        atom-pair contributions mat[K,L] + mat[L,K] (L < K)
         """
         return np.concatenate((np.diag(mat), mat[iu0, iu1] + mat[iu1, iu0]))
 
-    prop = {
+    prop: dict[str, Union[np.ndarray, list[np.ndarray]]] = {
         CompKeys.coul: _a_ap(coul),
         CompKeys.exch: _a_ap(exch),
         CompKeys.kin: np.concatenate((e_kin, zeros_ap)),
@@ -212,14 +199,6 @@ def aap_prop_tot(
     }
 
     if dft_calc:
-        # exact exchange included in the DFT XC energy
-        if restrict:
-            e_dft_x = -0.25 * (rdm1_atom_tot @ vk.ravel())
-        else:
-            e_dft_x = -0.5 * sum(
-                rdm1_atom[i].reshape(natm, -1) @ vk[i].ravel() for i in range(2)
-            )
-
         prop[CompKeys.exch_DFT] = np.concatenate((e_dft_x, zeros_ap))
         prop[CompKeys.xc] = np.concatenate((e_xc, zeros_ap))
         prop[CompKeys.xc_nlc] = np.concatenate((e_xc_nlc, zeros_ap))
@@ -264,94 +243,3 @@ def aap_prop_tot(
 
 
 # end aap_prop_tot
-
-
-def _e_nuc_ap(mol: gto.Mole) -> np.ndarray:
-    """
-    this function returns the nuclear repulsion energy per atom pair
-    """
-    # coordinates and charges of nuclei
-    charges = mol.atom_charges()
-    # internuclear distances (with self-repulsion removed)
-    dist = gto.inter_distance(mol)
-    dist[np.diag_indices_from(dist)] = 1e200
-    enuc = contract("i,ij,j->ij", charges, 1.0 / dist, charges)
-
-    return enuc[np.triu_indices(mol.natm, k=1)]
-
-
-def _atom_rdm1(
-    mo_coeff: tuple[np.ndarray, np.ndarray],
-    mo_occ: tuple[np.ndarray, np.ndarray],
-    weights: list[np.ndarray],
-    spin_mos: tuple[np.ndarray, np.ndarray],
-    natm: int,
-) -> np.ndarray:
-    """
-    this function calculates the atom-specific RDM1s - shape (2, natm, nao, nao):
-    rdm1_atom[i,a] = sum_m F[i][m,a] |c_m><c_m|, with F[i] from _orb_atom_occ()
-    """
-    nao = mo_coeff[0].shape[0]
-    rdm1_atom = np.zeros((2, natm, nao, nao), dtype=np.float64)
-    F = _orb_atom_occ(mo_occ, weights, spin_mos, natm)
-    for i, spin_mo in enumerate(spin_mos):
-        c = mo_coeff[i][:, spin_mo]
-        for a in range(natm):
-            rdm1_atom[i, a] = (c * F[i][:, a]) @ c.T
-    return rdm1_atom
-
-
-# end def _atom_rdm1
-
-
-def _e_jk_atoms(
-    mol: gto.Mole,
-    mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT],
-    rdm1_atom: np.ndarray,
-    rdm1_atom_tot: np.ndarray,
-    restrict: bool,
-    blksize: int = JK_BLKSIZE,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    this function calculates atom-atom Coulomb and exchange energy matrices:
-    coul[a,b] = 1/2 tr(J[D_a] D_b)
-    exch[a,b] = -1/2 sum_s tr(K[D_as] D_bs)
-    """
-    natm, nao = rdm1_atom.shape[1], rdm1_atom.shape[-1]
-    coul = np.zeros((natm, natm), dtype=np.float64)
-    exch = np.zeros((natm, natm), dtype=np.float64)
-    for a0, a1 in lib.prange(0, natm, blksize):
-        n = a1 - a0
-        if restrict:  # alpha and beta 1-RDMs are identical -> one J/K build per atom
-
-            vj, vk = mf.get_jk(
-                mol=mol, dm=rdm1_atom[0, a0:a1], with_j=True, with_k=True
-            )
-            vj, vk = vj.reshape(n, -1), vk.reshape(n, -1)
-
-            coul[a0:a1] = vj @ rdm1_atom_tot.T  # 1/2 tr(2 vj, D_tot)
-            exch[a0:a1] = (
-                -vk @ rdm1_atom[0].reshape(natm, -1).T
-            )  # -1/2 * 2 spins * tr(vk, D_alpha)
-
-        else:
-
-            vj, vk = mf.get_jk(
-                mol=mol,
-                dm=rdm1_atom[:, a0:a1].reshape(-1, nao, nao),
-                with_j=True,
-                with_k=True,
-            )
-            vj, vk = vj.reshape(2, n, -1), vk.reshape(2, n, -1)
-
-            coul[a0:a1] = 0.5 * (vj[0] + vj[1]) @ rdm1_atom_tot.T
-            exch[a0:a1] = -0.5 * sum(
-                vk[i] @ rdm1_atom[i].reshape(natm, -1).T for i in range(2)
-            )
-
-        # end if
-    # end for
-    return coul, exch
-
-
-# end def _e_jk_atoms

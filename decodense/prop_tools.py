@@ -5,6 +5,7 @@
 prop_tools module
 """
 
+import copy
 import numpy as np
 from pyscf import gto, scf, dft, df, lib, solvent
 from pyscf.dft import numint
@@ -14,13 +15,17 @@ from pyscf.pbc.dft import numint as pbc_numint
 from typing import Union, Optional, Iterable, Iterator
 
 from .pbctools import get_nuc_pbc
-from .tools import dim, contract, logger
+from .tools import dim, contract, logger, make_rdm1
 
 # atom-wise (array) or orbital-wise (list of arrays per spin) xc energies
 XCPart = Union[np.ndarray, list[np.ndarray]]
 
 # block size in _point_charges()
 BLKSIZE = 200
+
+# max. number of atom-RDM1s per batched get_jk call in _e_jk_atoms()
+# (lower it to save memory)
+JK_BLKSIZE = 16
 
 
 def _h_core(
@@ -552,3 +557,84 @@ def _tr_atom(
     if restrict:
         return _mo_diag(op, c[0]) @ (F[0] + F[1])
     return _mo_diag(op, c[0]) @ F[0] + _mo_diag(op, c[1]) @ F[1]
+
+
+def _e_jk_atoms(
+    mol: gto.Mole,
+    mf: Union[scf.hf.SCF, dft.rks.KohnShamDFT],
+    c: list[np.ndarray],
+    F: list[np.ndarray],
+    restrict: bool,
+    blksize: int = JK_BLKSIZE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    this function returns the atom-atom Coulomb and exchange energy matrices
+    """
+    natm, nao = F[0].shape[1], c[0].shape[0]
+    nspin = 1 if restrict else 2
+    coul = np.zeros((natm, natm), dtype=np.float64)
+    exch = np.zeros((natm, natm), dtype=np.float64)
+    for k0, k1 in lib.prange(0, natm, blksize):
+        n = k1 - k0
+        # atom-specific 1-RDMs of this batch (alpha only if restricted)
+        dm = np.array(
+            [make_rdm1(c[s], F[s][:, k]) for s in range(nspin) for k in range(k0, k1)]
+        )
+        vj, vk = mf.get_jk(mol=mol, dm=dm, with_j=True, with_k=True)
+        del dm
+        if restrict:  # alpha and beta 1-RDMs are identical -> one J/K build per atom
+            # 1/2 tr(2 vj, d_L)
+            coul[k0:k1] = _tr_atom(vj, c, F, restrict)
+            # -1/2 * 2 spins * tr(vk, d_L,alpha)
+            exch[k0:k1] = -_tr_atom(vk, c, F, restrict, spin=0)
+        else:
+            vj, vk = vj.reshape(2, n, nao, nao), vk.reshape(2, n, nao, nao)
+            coul[k0:k1] = 0.5 * _tr_atom(vj[0] + vj[1], c, F, restrict)
+            exch[k0:k1] = -0.5 * sum(
+                _tr_atom(vk[s], c, F, restrict, spin=s) for s in range(2)
+            )
+    return coul, exch
+
+
+def _e_dft_x(
+    mol: gto.Mole,
+    mf: dft.rks.KohnShamDFT,
+    rdm1: np.ndarray,
+    c: list[np.ndarray],
+    F: list[np.ndarray],
+    exch: np.ndarray,
+    restrict: bool,
+    rdm1_from_mos: bool,
+) -> np.ndarray:
+    """
+    this function returns the atom contributions to the exact exchange included in
+    the DFT XC energy
+    """
+    rdm1_jk = np.sum(rdm1, axis=0) if restrict else rdm1
+
+    def tr_vk(vk: np.ndarray) -> np.ndarray:
+        """
+        this function returns -1/4 tr(vk d_K) (restricted) or
+        -1/2 sum_s tr(vk_s d_K,s) (unrestricted) for all atoms K
+        """
+        if restrict:
+            return -0.25 * _tr_atom(vk, c, F, restrict)
+        return -0.5 * sum(_tr_atom(vk[s], c, F, restrict, spin=s) for s in range(2))
+
+    # user-supplied 1-RDM: the d_L do not sum to D -> full K build
+    if not rdm1_from_mos:
+        return tr_vk(
+            _vk_dft(
+                mol,
+                mf,
+                mf.xc,
+                rdm1_jk,
+                copy.copy(mf.vk) if hasattr(mf, "vk") else None,
+            )
+        )
+    ks_omega, _, ks_hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc)
+    e_dft_x = ks_hyb * np.sum(exch, axis=1)
+    if abs(ks_omega) > 1e-10:
+        # long-range part only (a zero full-range operator is passed to _vk_dft)
+        e_dft_x += tr_vk(_vk_dft(mol, mf, mf.xc, rdm1_jk, np.zeros_like(rdm1_jk)))
+    return e_dft_x

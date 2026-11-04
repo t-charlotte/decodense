@@ -205,6 +205,8 @@ def _scheme_bonds_aap2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
         raise NotImplementedError("Bond-wise decomposition for NDOs NYI!")
     if any(hasattr(mf, attr) for attr in ("mm_mol", "with_solvent", "h1e_mmpol")):
         raise NotImplementedError("AAP2B bond-decomposition for solvation energies NYI!")
+    if mol.has_ecp():
+        raise NotImplementedError("AAP2B bond-wise decomposition with ECPs NYI!")
 
     # 1. Compute atomic weights
     weights = assign_rdm1s(

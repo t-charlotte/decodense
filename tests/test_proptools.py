@@ -186,7 +186,7 @@ def test_mo_diag():
 
 # _tr_atom
 # tr(op d_K) must match an explicit calculation with the atom-specific 1-RDMs
-# d_sK = sum_m F[s][m,K] |c_sm><c_sm|: for one spin, summed over spins (unrestricted
+# d_K,s = sum_m F[s][m,K] |c_s,m><c_s,m|: for one spin, summed over spins (unrestricted
 # and restricted), and for single and multi-component operators
 def test_tr_atom():
     rng = np.random.default_rng(6)
