@@ -172,7 +172,7 @@ def prop_tot(
     if part_method == "ao":
         ao_atm = np.array([lbl[0] for lbl in mol.ao_labels(fmt=None)])
 
-    def energy_tail(res: dict[str, np.ndarray]) -> None:
+    def finalize_atom_e(res: dict[str, np.ndarray]) -> None:
         """
         this function adds the atom-wise energy terms that are computed outside the
         kernels (solvent nuclear and vdw terms, xc and nlc energies), and the sum of
@@ -192,7 +192,9 @@ def prop_tot(
 
     def prop_atom_mo() -> dict[str, np.ndarray]:
         """
-        this function returns MO-based atom-wise energy/dipole contributions
+        this function adds the atom-wise energy terms that are computed outside the
+        kernels (solvent nuclear and vdw terms, xc and nlc energies), and the sum of
+        all electronic contributions
         """
         # orbital-to-atom occupation factors and occupied mo coefficients
         F = _orb_atom_occ(mo_occ, weights, (alpha, beta), natm)
@@ -219,7 +221,7 @@ def prop_tot(
             res[CompKeys.nuc_att_glob] = e_nuc_att_glob
             if pot_solv is not None:
                 res[CompKeys.solvent] = tr_atom(pot_solv)
-            energy_tail(res)
+            finalize_atom_e(res)
         elif prop_type == "dipole":
             res[CompKeys.el] = -tr_atom(ao_dip).T
         return res
@@ -227,7 +229,8 @@ def prop_tot(
     def prop_atom_ao() -> dict[str, np.ndarray]:
         """
         this function returns AO-based atom-wise (EDA - energy density analysis)
-        energy/dipole contributions
+        energy/dipole contributions of all atoms, using
+        sum_{mu in K} sum_nu O_munu D_munu
         """
 
         def tr_atom(op: np.ndarray, dm: np.ndarray) -> np.ndarray:
@@ -253,7 +256,7 @@ def prop_tot(
             res[CompKeys.nuc_att_glob] = e_nuc_att_glob
             if pot_solv is not None:
                 res[CompKeys.solvent] = tr_atom(pot_solv, rdm1_tot_sum)
-            energy_tail(res)
+            finalize_atom_e(res)
         elif prop_type == "dipole":
             res[CompKeys.el] = -tr_atom(ao_dip, rdm1_tot_sum).T
         return res
