@@ -36,12 +36,13 @@ def bond_mbo(
     ndo: bool,
     verbose: int,
     bond_mask: Optional[np.ndarray] = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
     This function calculates the Mayer bond orders (MBOs) for the given molecule.
-    It returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
-    and a boolean array (ordered according to ap_label) that is True for bonds according to bond_crit.
-    Atom pairs that are not bonds according to bond_crit get zero weight.
+    It returns the atom-to-atom-pair weights, shape (natm, npairs):
+    the MBO of each atom pair, normalized over the atom pairs of each atom.
+    Atom pairs that are not bonds according to bond_mask get zero weight,
+    and atoms without bonds get a zero row.
     """
 
     # RHF reference
@@ -117,11 +118,10 @@ def bond_mbo(
         mocc_b = mo_occ[1][beta]
         rdm1_b = make_rdm1(mo_b, mocc_b)
 
-    def _mbo_atom_to_ap(mbo: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _mbo_atom_to_ap(mbo: np.ndarray) -> np.ndarray:
         """
-        Returns an array with normalized MBOs from atom to atom pair (atom_labels,ap_labels)
-            and a boolean array (ordered according to ap_label) that is True for bonds.
-        Requires an array of MBOs (atom_label_0, atom_label_1) as input.
+        Returns the normalized MBOs from atom to atom pair, shape (natm, npairs).
+        Requires the matrix of MBOs, shape (natm, natm), as input.
         """
 
         # upper-triangle atom-pair indices
@@ -154,7 +154,7 @@ def bond_mbo(
 
         return mbo_AtoAP
 
-    # end def _mbo_atom_to_bond()
+    # end def _mbo_atom_to_ap()
 
     def _get_mulpop(
         rdm1: np.ndarray,
@@ -221,12 +221,14 @@ def bond_mbo(
 
     # verbose print
     if verbose >= VERBOSE_MBO:
-        a_labels = [f"{pmol.atom_pure_symbol(k)}{k}" for k in range(pmol.natm)]
+        # without a bond mask, every atom pair is a bond
+        is_bond = bond_mask if bond_mask is not None else np.ones(npairs, dtype=bool)
+        a_labels = [f"{pmol.atom_pure_symbol(k)}{k}" for k in range(natm)]
         ap_labels = [
-            f"{mol.atom_symbol(a1)}{a1}-{mol.atom_symbol(a2)}{a2}{'*' if bond else ''}"
-            for a1, a2, bond in zip(a1_idx, a2_idx, bond_mask)
+            f"{a_labels[a1]}-{a_labels[a2]}{'*' if bond else ''}"
+            for a1, a2, bond in zip(a1_idx, a2_idx, is_bond)
         ]
-        ap_mbo = mbo[a_idx, ap_idx]
+        ap_mbo = mbo[a1_idx, a2_idx]
 
         # Mayer bond orders
         logger.info("\n *** Mayer bond orders ***")
@@ -250,8 +252,8 @@ def bond_mbo(
                 )
                 for a1 in range(natm):
                     f.write(
-                        f"  {atom_labels[a]:>4s} "
-                        + " ".join(f"{a2:10.5f}" for a2 in mbo_AtoAP[a1])
+                        f"  {a_labels[a1]:>4s} "
+                        + " ".join(f"{w:10.5f}" for w in mbo_AtoAP[a1])
                         + "\n"
                     )
             logger.info(f"\n full atom-to-bond weight matrix written to {filename}\n")
