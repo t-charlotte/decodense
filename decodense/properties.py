@@ -90,6 +90,7 @@ def prop_tot(
     rdm1_tot = np.array(
         [rdm1_tot_a, rdm1_tot_a if restrict else make_rdm1(mo_coeff[1], mo_occ[1])]
     )
+    rdm1_from_mos = rdm1 is None
     if rdm1 is None:
         rdm1 = rdm1_tot
     if rdm1.ndim == 2:
@@ -145,6 +146,37 @@ def prop_tot(
         else:
             vj, vk = mf.get_jk(mol=mol, dm=rdm1_jk, with_k=with_k)
 
+    # (i)ao-to-atom indices for the ao-based (eda) partitioning;
+    # pop_method == "iao": orthonormal iaos per spin
+    # (lossless, since the occupied space lies within the iao span)
+    iao_c = sc = iao_xc = None
+    if part_method == "ao":
+        if pop_method == "iao":
+            if isinstance(mol, pbc_gto.Cell):
+                raise NotImplementedError("IAO-based EDA is not implemented for PBC")
+            if ndo or not rdm1_from_mos:
+                raise NotImplementedError(
+                    "IAO-based EDA requires a 1-RDM built from the (non-NDO) MOs"
+                )
+            s = mol.intor_symmetric("int1e_ovlp")
+            iao_c = []
+            for i, spin_mo in enumerate((alpha, beta)):
+                if i == 1 and (restrict or spin_mo.size == 0):
+                    iao_c.append(iao_c[0])  # identical iaos / no beta electrons
+                    continue
+                c_iao = lo.iao.iao(mol, mo_coeff[i][:, spin_mo], minao=minao)
+                iao_c.append(lo.vec_lowdin(c_iao, s))
+            sc = [s @ c for c in iao_c]
+            ao_atm = np.array([lbl[0] for lbl in pmol.ao_labels(fmt=None)])
+            if dft_calc:
+                # iaos, iao-basis 1-RDMs and iao-to-atom indices for the xc partitioning
+                if restrict:
+                    iao_xc = ([iao_c[0]], [sc[0].T @ rdm1_tot_sum @ sc[0]], ao_atm)
+                else:
+                    iao_xc = (iao_c, [sc[i].T @ rdm1_tot[i] @ sc[i] for i in range(2)], ao_atm)
+        else:
+            ao_atm = np.array([lbl[0] for lbl in mol.ao_labels(fmt=None)])
+
     # xc energy contributions: atom-wise ("mo"/"ao") or orbital-wise
     e_xc: Optional[Union[np.ndarray, list[np.ndarray]]] = None
     e_xc_nlc: Optional[Union[np.ndarray, list[np.ndarray]]] = None
@@ -155,7 +187,7 @@ def prop_tot(
             vk = _vk_dft(mol, mf, mf.xc, rdm1_jk, vk)
             # xc energy (incl. nlc (vv10)) from individual atoms or orbitals
             e_xc, e_xc_nlc = _xc_energies(
-                mol, mf, mo_coeff, mo_occ, rdm1, weights, part_method, natm
+                mol, mf, mo_coeff, mo_occ, rdm1, weights, part_method, natm, iao=iao_xc
             )
 
     if prop_type == "energy":
@@ -164,10 +196,6 @@ def prop_tot(
             vj_sum = np.sum(vj, axis=0)
         # global nuclear attraction: 1/2 tr(V_K D) for all atoms K
         e_nuc_att_glob = 0.5 * e_nuc_att
-
-    # ao-to-atom indices
-    if part_method == "ao":
-        ao_atm = np.array([lbl[0] for lbl in mol.ao_labels(fmt=None)])
 
     def finalize_atom_e(res: dict[str, np.ndarray]) -> None:
         """
@@ -228,34 +256,46 @@ def prop_tot(
         this function returns AO-based atom-wise (EDA - energy density analysis)
         energy/dipole contributions of all atoms, using
         sum_{mu in K} sum_nu O_munu D_munu
+        in the ao basis, or (pop_method == "iao") in the orthonormal iao basis
         """
 
-        def tr_atom(op: np.ndarray, dm: np.ndarray) -> np.ndarray:
-            # per-ao contributions sum_nu op_munu dm_munu, summed per atom
+        def _per_atom(op: np.ndarray, dm: np.ndarray) -> np.ndarray:
+            # per-(i)ao contributions sum_nu op_munu dm_munu, summed per atom
             o = np.einsum("...ij,ij->...i", op, dm)
             if o.ndim == 1:
                 return np.bincount(ao_atm, weights=o, minlength=natm)
             return np.stack([np.bincount(ao_atm, weights=x, minlength=natm) for x in o])
 
+        def tr_atom(op: np.ndarray, spin: Optional[int] = None) -> np.ndarray:
+            # spin None: spin-summed 1-RDM; spin 0/1: 1-RDM of that spin
+            if iao_c is None:
+                return _per_atom(op, rdm1_tot_sum if spin is None else rdm1_tot[spin])
+            if spin is not None:
+                return _per_atom(
+                    iao_c[spin].T @ op @ iao_c[spin],
+                    sc[spin].T @ rdm1_tot[spin] @ sc[spin],
+                )
+            if restrict:
+                return _per_atom(iao_c[0].T @ op @ iao_c[0], sc[0].T @ rdm1_tot_sum @ sc[0])
+            return tr_atom(op, 0) + tr_atom(op, 1)
+
         # init results
         res: dict[str, np.ndarray] = {}
         if prop_type == "energy":
             if restrict:
-                res[CompKeys.coul] = 0.5 * tr_atom(vj, rdm1_tot_sum)
-                res[CompKeys.exch] = -0.25 * tr_atom(vk, rdm1_tot_sum)
+                res[CompKeys.coul] = 0.5 * tr_atom(vj)
+                res[CompKeys.exch] = -0.25 * tr_atom(vk)
             else:
-                res[CompKeys.coul] = 0.5 * tr_atom(vj_sum, rdm1_tot_sum)
-                res[CompKeys.exch] = -0.5 * (
-                    tr_atom(vk[0], rdm1_tot[0]) + tr_atom(vk[1], rdm1_tot[1])
-                )
-            res[CompKeys.kin] = tr_atom(kin, rdm1_tot_sum)
-            res[CompKeys.nuc_att_loc] = 0.5 * tr_atom(nuc, rdm1_tot_sum)
+                res[CompKeys.coul] = 0.5 * tr_atom(vj_sum)
+                res[CompKeys.exch] = -0.5 * (tr_atom(vk[0], 0) + tr_atom(vk[1], 1))
+            res[CompKeys.kin] = tr_atom(kin)
+            res[CompKeys.nuc_att_loc] = 0.5 * tr_atom(nuc)
             res[CompKeys.nuc_att_glob] = e_nuc_att_glob
             if pot_solv is not None:
-                res[CompKeys.solvent] = tr_atom(pot_solv, rdm1_tot_sum)
+                res[CompKeys.solvent] = tr_atom(pot_solv)
             finalize_atom_e(res)
         elif prop_type == "dipole":
-            res[CompKeys.el] = -tr_atom(ao_dip, rdm1_tot_sum).T
+            res[CompKeys.el] = -tr_atom(ao_dip).T
         return res
 
     def prop_orb() -> dict[str, list[np.ndarray]]:
