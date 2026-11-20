@@ -331,12 +331,24 @@ def _xc_partition(
     weights: Optional[list[np.ndarray]],
     part_method: Optional[str],
     natm: int,
+    iao: Optional[tuple[list[np.ndarray], list[np.ndarray], np.ndarray]] = None,
 ) -> XCPart:
     """
     this function takes block-wise quantities and returns atom- or orbital-wise xc energies
     """
     spin_mos = dim(mo_occ)
     if part_method == "ao":
+        if iao is not None:
+            # iao contributions: e_a = sum_s sum_r w(r) eps(r) phi_a(r) sum_b D^s_ab phi_b(r)
+            # (phi = ao . C_s, orthonormal iaos of spin s; D^s in the iao basis)
+            iao_c, dm_iao, iao_atm = iao
+            e_iao = np.zeros(iao_c[0].shape[1], dtype=np.float64)
+            for ao0, weps, c0 in blocks:
+                del c0  # not needed
+                for c_s, d_s in zip(iao_c, dm_iao):
+                    phi = ao0 @ c_s
+                    e_iao += contract("p,pi,pi->i", weps, phi, phi @ d_s)
+            return np.bincount(iao_atm, weights=e_iao, minlength=natm)
         # ao contributions: e_mu = sum_r w(r) eps(r) chi_mu(r) sum_nu D_munu chi_nu(r)
         # (sum_nu D_munu chi_nu(r) = c0, reused from the evaluation of rho)
         e_ao = np.zeros(mol.nao_nr(), dtype=np.float64)
@@ -374,6 +386,7 @@ def _xc_energies(
     weights: Optional[list[np.ndarray]],
     part_method: Optional[str],
     natm: int,
+    iao: Optional[tuple[list[np.ndarray], list[np.ndarray], np.ndarray]] = None,
 ) -> tuple[XCPart, Optional[XCPart]]:
     """
     this function returns the "pure" xc and nlc (vv10) energies (None if no nlc) from
@@ -397,6 +410,7 @@ def _xc_energies(
         weights,
         part_method,
         natm,
+        iao,
     )
     e_xc_nlc = None
     if not isinstance(mol, pbc_gto.Cell) and mf.do_nlc():
@@ -408,6 +422,7 @@ def _xc_energies(
             weights,
             part_method,
             natm,
+            iao,
         )
     return e_xc, e_xc_nlc
 
