@@ -22,7 +22,8 @@ PART = (
 # bond-wise schemes
 POP_METHOD_BOND = ("mulliken", "iao")
 PART_BOND = (
-    ("bonds", "a2b"),  # atoms-to-bonds
+    ("bonds", "a2b_mo"),  # atoms-to-bonds (MO-based atom-wise step)
+    ("bonds", "a2b_ao"),  # atoms-to-bonds (AO-based atom-wise step)
     ("bonds", "aap2b"),  # atoms-and-atom-pairs-to-bonds
 )
 

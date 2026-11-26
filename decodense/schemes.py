@@ -29,7 +29,8 @@ def _scheme_atoms(
     decomp,
 ):
     """
-    This function takes care of atom-wise decompositions:
+    This function takes care of atom-wise decompositions
+    (also the atom-wise step of the A2B bond-wise scheme):
     1. Compute atomic weights (only if part_method == "mo")
     2. Perform the decomposition
     3. Write the RDM1s if requested
@@ -37,7 +38,8 @@ def _scheme_atoms(
 
     if decomp.part == "bonds":
         part = "atoms"
-        part_method = "mo"
+        # underlying atom-wise scheme of the A2B bond-wise scheme
+        part_method = {"a2b_mo": "mo", "a2b_ao": "ao"}[decomp.part_method]
     else:
         part = decomp.part
         part_method = decomp.part_method
@@ -152,13 +154,18 @@ def _scheme_bonds_a2b(mol, mf, mo_coeff, mo_occ, rdm1, decomp):
     if decomp.ndo:
         raise NotImplementedError("Bond-wise decomposition for NDOs NYI!")
 
-    # 2. Perform an atom-wise decomposition
-    atom_res = _scheme_atoms(  # NOTE: MO for now -> how to implement choosing AO?
+    # 2. Perform an atom-wise decomposition (MO- or AO-based, see part_method)
+    atom_res = _scheme_atoms(
         mol, mf, mo_coeff, mo_occ, rdm1, decomp
     )
-    logger.warning(
-        'The "a2b" bond-wise decomposition scheme uses '
-        "Eriksen's MO-based atom-wise decomposition scheme."
+    logger.info(
+        f'The "{decomp.part_method}" bond-wise decomposition scheme uses '
+        + (
+            "Eriksen's MO-based"
+            if decomp.part_method == "a2b_mo"
+            else "Nakai's AO-based"
+        )
+        + " atom-wise decomposition scheme."
     )
 
     # 3. Compute bond weights
@@ -257,6 +264,7 @@ SCHEMES = {
     ("atoms", "mo"): _scheme_atoms,
     ("atoms", "ao"): _scheme_atoms,
     ("orbitals", None): _scheme_orbitals,
-    ("bonds", "a2b"): _scheme_bonds_a2b,
+    ("bonds", "a2b_mo"): _scheme_bonds_a2b,
+    ("bonds", "a2b_ao"): _scheme_bonds_a2b,
     ("bonds", "aap2b"): _scheme_bonds_aap2b,
 }

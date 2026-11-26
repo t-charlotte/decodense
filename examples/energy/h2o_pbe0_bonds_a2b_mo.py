@@ -8,13 +8,12 @@ from pandas import set_option
 
 import decodense
 
-# init molecule (formaldehyde)
+# init molecule (water)
 mol = gto.M(
     atom="""
-    C     0.00072760  -0.00011425   0.00000109
-    O     1.17836953  -0.18502406   0.00176610
-    H    -0.73339368  -0.82354548  -0.00115967
-    H    -0.44570339   1.00868375  -0.00060753
+        O  0.00000000  0.00000000  0.00000000
+        H -0.75390364  0.00000000 -0.58783729
+        H  0.75390364  0.00000000 -0.58783729
     """,
     verbose=0,
     output=None,
@@ -46,7 +45,7 @@ stable, direction = loc.stability_check()
 # verbose = 1 prints the intermediates
 print("\nDecomposition without atomic reference energies nor bond mask:")
 decomp = decodense.DecompCls(
-    pop_method="iao", part="bonds", part_method="a2b", verbose=1
+    pop_method="iao", part="bonds", part_method="a2b_mo", verbose=1
 )
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
@@ -58,7 +57,6 @@ del(res)
 # atomic reference energies
 atom_ref_dict = {
     "H": -0.500429058214292,
-    "C": -37.63763262290564,
     "O": -74.97343342944708,
 }
 
@@ -67,7 +65,7 @@ atom_ref_dict = {
 # verbose = 1 prints the intermediates
 print("\nDecomposition with atomic reference energies without bond mask:")
 decomp = decodense.DecompCls(
-    pop_method="iao", part="bonds", part_method="a2b", verbose=1, atom_ref=atom_ref_dict
+    pop_method="iao", part="bonds", part_method="a2b_mo", verbose=1, atom_ref=atom_ref_dict
 )
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
@@ -76,29 +74,24 @@ print(res)
 
 del(res)
 
-# bond_mask
+# bond mask
 bond_mask = [
-    (0,1), # C0-O1
-    (0,2), # C0-H2
-    (0,3), # C0-H3
+    (0,1), # O0-H1
+    (0,2), # O0-H2
 ]
 
-# other valid bond mask:
+# other valid bond mask
 # bond_mask = [
-#     True, # C0-O1
-#     True, # C0-H2
-#     True, # C0-H3
-#     False, # O1-H2
-#     False, # O1-H3
-#     False, # H2-H3
+#     True, # O0-H1
+#     True, # O0-H2
+#     False, # H1-H2
 # ]
 
 # decomposition
-# by default, all atom pairs will be considered for the decomposition
 # verbose = 1 prints the intermediates
 print("\nDecomposition with bond mask without atomic reference energies:")
 decomp = decodense.DecompCls(
-    pop_method="iao", part="bonds", part_method="a2b", verbose=1, bond_mask=bond_mask
+    pop_method="iao", part="bonds", part_method="a2b_mo", verbose=1, bond_mask=bond_mask
 )
 res = decodense.main(mol, decomp, mf, mo_coeff)
 
@@ -111,7 +104,7 @@ del(res)
 # verbose = 1 prints the intermediates
 print("\nDecomposition with atomic reference energies and bond mask:")
 decomp = decodense.DecompCls(
-    pop_method="iao", part="bonds", part_method="a2b", verbose=1, atom_ref=atom_ref_dict, bond_mask=bond_mask
+    pop_method="iao", part="bonds", part_method="a2b_mo", verbose=1, atom_ref=atom_ref_dict, bond_mask=bond_mask
 )
 res = decodense.main(mol, decomp, mf, mo_coeff)
 

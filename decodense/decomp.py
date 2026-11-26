@@ -210,10 +210,12 @@ def sanity_check(
                 '"mo" (Eriksen\'s MO-based scheme - default) or "ao" (Nakai\'s AO-based energy density analysis scheme)'
             )
     elif decomp.part == "bonds":
-        if decomp.part_method not in ("a2b", "aap2b"):
+        if decomp.part_method not in ("a2b_mo", "a2b_ao", "aap2b"):
             raise ValueError(
                 'invalid partitioning method. valid choices for part="bonds": '
-                '"a2b" (atoms-to-bonds) or "aap2b" (atoms-and-atom-pairs-to-bonds)'
+                '"a2b_mo" (atoms-to-bonds, based on Eriksen\'s MO-based atom-wise scheme), '
+                '"a2b_ao" (atoms-to-bonds, based on Nakai\'s AO-based atom-wise scheme) or '
+                '"aap2b" (atoms-and-atom-pairs-to-bonds)'
             )
         if decomp.pop_method not in ("mulliken", "iao"):
             raise ValueError(
